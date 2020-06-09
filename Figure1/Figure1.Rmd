@@ -1,0 +1,118 @@
+```{r}
+library(plyr)
+library(tidyr)
+library(ggplot2)
+
+# Load trial by trial behavioral data
+bdat = fread('../data/bdat.csv',sep=',')
+```
+
+Plot trial structure for each session
+```{r}
+# Trial info for each session
+bdat_3000 = bdat[1:3000,]
+
+bdat_xzh = data.frame(Trial = rep(1:3000,3),
+                      Measure = c(rep('Hazard',3000),rep('Source',3000),rep('Tone',3000)),
+                      Value = c(bdat_3000$H,bdat_3000$Z,bdat_3000$X))
+
+tplt = ggplot(bdat_xzh,aes(Trial,Value))+
+  geom_line()+
+  facet_wrap(~Measure,nrow=3)+
+  geom_vline(xintercept=c(1000,2000),linetype=2,color='red')+
+  theme(
+    axis.text = element_text(size=12,color='black'),
+    axis.title = element_text(size=14,color='black'),
+    strip.background = element_blank(),
+    strip.text = element_text(size=14,color='black',face='bold'),
+    axis.line.x = element_line(size = .5,color="black"),
+    axis.line.y = element_line(size=.5,color="black"),
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+    )
+tplt
+ggsave('./F1_Trials.pdf',plot = tplt,width = 9.5,height = 4)
+```
+
+Plot subject and simulated responses
+```{r}
+#Simulate responses
+rnum = runif(length(bdat$Resp))
+bdat$SimResp = as.numeric(rnum < bdat$P_Bayes_Prior)
+bdat$SimResp[is.na(bdat$Resp) == 1] = NA
+
+# Get correct responses
+bdat$SimCorrect = ifelse(bdat$Z == 0, 1-bdat$P_Bayes_Prior,bdat$P_Bayes_Prior)
+bdat$Hazard = factor(bdat$H,levels=c(.01,.3,.99),labels=c('H = 0.01','H = 0.3','H = .99'))
+bdat$SubRespSwitch = c(NA,as.numeric(bdat$Resp[1:(length(bdat$Resp)-1)] != bdat$Resp[-1]))
+
+# Get response switches for simulations
+bdat$SimRespSwitch = c(NA,as.numeric(bdat$SimResp[1:(length(bdat$SimResp)-1)] != bdat$SimResp[-1]))
+
+# Get mean/SEM for correct response and switches
+bdat.simresp.p = ddply(bdat,.(Subject,Hazard,TSCP2),summarize,MCor = mean(SimCorrect,na.rm=T),MRespSwitch = mean(SimRespSwitch,na.rm=T))
+bdat.simresp.m = ddply(bdat.simresp.p,.(Hazard,TSCP2),summarize,
+                       Correct = mean(MCor,na.rm=T),MSE = mean_se(MCor)[[2]],PSE = mean_se(MCor)[[3]],
+                       RespSw = mean(MRespSwitch,na.rm=T),RMSE = mean_se(MRespSwitch)[[2]],RPSE = mean_se(MRespSwitch)[[3]])
+bdat.simresp.m$Type = 'Simulation'
+
+bdat.subresp.p = ddply(bdat,.(Subject,Hazard,TSCP2),summarize,MCor = mean(Correct,na.rm=T), MRespSwitch = mean(SubRespSwitch,na.rm=T))
+bdat.subresp.m = ddply(bdat.subresp.p,.(Hazard,TSCP2),summarize,
+                       Correct = mean(MCor,na.rm=T),MSE = mean_se(MCor)[[2]],PSE = mean_se(MCor)[[3]],
+                       RespSw = mean(MRespSwitch,na.rm=T),RMSE = mean_se(MRespSwitch)[[2]],RPSE = mean_se(MRespSwitch)[[3]])
+bdat.subresp.m$Type = 'Subject'
+
+
+# Merge for subjects and simulations
+bdat.correct.m = rbind(bdat.simresp.m,bdat.subresp.m)
+bdat.correct.m$Type = factor(bdat.correct.m$Type,levels=c('Subject','Simulation'))
+
+# Plot proportion correct responses for sbjects and simulations
+corSim = ggplot(bdat.correct.m,aes(TSCP2,Correct,ymin=MSE,ymax=PSE,color=Hazard,group=Hazard))+
+  geom_errorbar(width=.1)+
+  geom_point(size=3)+
+  geom_line(aes(linetype=Type))+
+  ylim(c(0,1))+
+  facet_wrap(~Type)+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab('Trial Since Source Switch' )+
+  xlab('Proportion Correct Predictions')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=14,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+corSim
+ggsave('./F1_SimCorrect.pdf',plot = corSim,width = 9.5,height = 4)
+
+# Plot proportion response switches for sbjects and simulations
+swSim = ggplot(bdat.correct.m,aes(TSCP2,RespSw,ymin=RMSE,ymax=RPSE,color=Hazard,group=Hazard))+
+  geom_errorbar(width=.1)+
+  geom_point(size=3)+
+  geom_line(aes(linetype=Type))+
+  ylim(c(0,1))+
+  facet_wrap(~Type)+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab('Trial Since Source Switch' )+
+  xlab('Proportion Prediction Switches')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=14,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+swSim
+ggsave('./F1_SimSw.pdf',plot = swSim,width = 9.5,height = 4)
+```
