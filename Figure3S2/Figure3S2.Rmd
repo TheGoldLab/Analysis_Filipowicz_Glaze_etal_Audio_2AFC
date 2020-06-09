@@ -1,0 +1,225 @@
+This script does all of the pupil analyses of surprise on the pupil derivatives
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load trial by trial pupil data
+pdat = fread('../data/pdat.csv',sep=',')
+
+#Compute sample by sample derivative and another column for peak derivative
+pdat_deriv = pdat[,.(Subject, Session, Hazard, Source, Stim, ChangePoint, TSCP,StimSwitch,Resp,RespSwitch,Correct,Missing, L_Bayes_Prior_Ab,Surprise, Baseline, Baseline_1, Change, Change_1)]
+pdat_deriv = data.frame(pdat_deriv)
+
+# Get difference from previous timepoint for derivative
+pp = as.matrix(pdat[,19:139])
+pp_T = t(pp)
+pp_T_diff = diff(pp_T)
+pp_diff = t(pp_T_diff)
+
+for(i in 1:120){
+  pdat_deriv$Pupil = pp_diff[,i]
+  names(pdat_deriv)[18+i] = paste0('Pupil_',i)
+}
+
+#Get max pupil derivative over two seconds post tone
+pdat_deriv$Peak_Deriv = do.call(pmax,c(pdat_deriv[,19:138],list(na.rm=T)))
+
+# Get mean pupil derivative for equally spaced bins - for p-values
+pdat_deriv_p = pdat_deriv
+bsize = 10
+interval = 120/bsize
+start = 20
+for(i in 1:bsize){
+  end = start+interval-1
+  pdat_deriv_p[,ncol(pdat_deriv_p)+1] = rowMeans(pdat_deriv_p[,start:end],na.rm=T)
+  names(pdat_deriv_p)[ncol(pdat_deriv_p)] = paste0("T",i)
+  start = start+interval
+}
+```
+
+Surprise and belief strength vs pupil derivative
+```{r}
+#Now do stats
+# Function to get regression coefficients for each sample timepoint
+getPupilDerivLME = function(dat,i,haz){
+  pd_h_all = subset(dat,Hazard == haz)
+  pd_h = pd_h_all[,c(1,13,14,16,17,19,19+i)]
+  names(pd_h)[7] = 'Pupil_Deriv'
+  pd_h$Pupil_Deriv = scale(pd_h$Pupil_Deriv)
+  pd_h$Surprise = scale(pd_h$Surprise)
+  pd_h$L_Bayes_Prior_Ab = scale(pd_h$L_Bayes_Prior_Ab)
+  pd_h$Baseline = scale(pd_h$Baseline)
+  pd_h$Change_1 = scale(pd_h$Change_1)
+  
+  der_h_lme = lmer(Pupil_Deriv~Surprise+L_Bayes_Prior_Ab+
+                     Baseline+Change_1+
+                     (1|Subject)+(1+Surprise|Subject)+(1+L_Bayes_Prior_Ab|Subject)+
+                     (1+Baseline|Subject)+(1+Change_1|Subject),
+                   pd_h,REML=F, control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  
+  summ_lme = summary(der_h_lme)
+  coef_lme = coef(der_h_lme)$Subject
+  betas_df = data.frame(coef_lme)
+  betas_df$Subject = row.names(coef_lme)
+  
+  return(list(Summary = summ_lme,Betas = betas_df))
+}
+
+#Takes about 4 hours on a 2017 quadcore macbook pro - skip to next section if already run
+library(parallel)
+cores = 8
+cl = makeCluster(cores)
+ran = 1:120 #1:120 for all samples
+clusterExport(cl,c("getPupilDerivLME","lmer","pdat_deriv","summary","coef","data.frame","lmerControl","ran"))
+
+print('Computing for H = .01')
+h1_pup_deriv = parLapply(cl,ran,function(i) getPupilDerivLME(pdat_deriv,i,0.01))
+saveRDS(h1_pup_deriv,"./h1_pup_deriv_sup_bs.rds")
+
+print('Computing for H = .3')
+h3_pup_deriv = parLapply(cl,ran,function(i) getPupilDerivLME(pdat_deriv,i,0.3))
+saveRDS(h3_pup_deriv,"./h3_pup_deriv_sup_bs.rds")
+
+print('Computing for H = .99')
+h9_pup_deriv = parLapply(cl,ran,function(i) getPupilDerivLME(pdat_deriv,i,0.99))
+saveRDS(h9_pup_deriv,"./h9_pup_deriv_sup_bs.rds")
+
+print("Done!")
+stopCluster(cl)
+```
+```{r}
+# Script to get p-values for 10 time points from tone onset
+
+# Use function from above to get p-values for each bin
+#a = getPupilDerivLME(pdat_deriv_p[,c(1:19,141:150)],1,0.01) #test
+
+library(parallel)
+cores = 8
+cl = makeCluster(cores)
+ran = 1:bsize
+clusterExport(cl,c("getPupilDerivLME","lmer","pdat_deriv_p","summary","coef","data.frame","lmerControl","ran",'bsize'))
+
+print('Computing for H = .01')
+h1_pup_deriv_ps = parLapply(cl,ran,function(i) getPupilDerivLME(pdat_deriv_p[,c(1:19,141:(141+bsize-1))],i,0.01))
+saveRDS(h1_pup_deriv_ps,"./h1_pup_deriv_sup_bs_ps.rds")
+
+print('Computing for H = .3')
+h3_pup_deriv_ps = parLapply(cl,ran,function(i) getPupilDerivLME(pdat_deriv_p[,c(1:19,141:(141+bsize-1))],i,0.3))
+saveRDS(h3_pup_deriv_ps,"./h3_pup_deriv_sup_bs_ps.rds")
+
+print('Computing for H = .99')
+h9_pup_deriv_ps = parLapply(cl,ran,function(i) getPupilDerivLME(pdat_deriv_p[,c(1:19,141:(141+bsize-1))],i,0.99))
+saveRDS(h9_pup_deriv_ps,"./h9_pup_deriv_sup_bs_ps.rds")
+
+print("Done!")
+stopCluster(cl)
+```
+
+
+```{r}
+#Load values computed from above
+h1_pup_deriv = readRDS("./h1_pup_deriv_sup_bs.rds")
+h3_pup_deriv = readRDS("./h3_pup_deriv_sup_bs.rds")
+h9_pup_deriv = readRDS("./h9_pup_deriv_sup_bs.rds")
+
+# Load p-values
+h1_pup_deriv_ps = readRDS("./h1_pup_deriv_sup_bs_ps.rds")
+h3_pup_deriv_ps = readRDS("./h3_pup_deriv_sup_bs_ps.rds")
+h9_pup_deriv_ps = readRDS("./h9_pup_deriv_sup_bs_ps.rds")
+
+#First extract all of the betas for each subject for each trial
+getBetaDfs = function(i,h1,h3,h9){
+  h1_betas = h1[[i]]$Betas
+  h1_betas$Hazard = 0.01
+    
+  h3_betas = h3[[i]]$Betas
+  h3_betas$Hazard = 0.3
+    
+  h9_betas = h9[[i]]$Betas
+  h9_betas$Hazard = 0.99
+  
+  return(rbind(h1_betas,h3_betas,h9_betas))
+}
+
+getAllBetas = function(ran,h1,h3,h9,h1p,h3p,h9p,ts,bsize){
+  h_betas = getBetaDfs(1,h1,h3,h9)
+  h_betas$Time = 1
+  for(i in 2:ran){
+    h_betas_t = getBetaDfs(i,h1,h3,h9)
+    h_betas_t$Time = i
+    h_betas = rbind(h_betas,h_betas_t)
+  }
+  
+  # Get pvalues for time bins
+  start = 1
+  for(i in 1:ts){
+    end = start+bsize-1
+    # Low Hazard p-values
+    h_betas$Sup_Pval[h_betas$Hazard == 0.01 & h_betas$Time %in% start:end] = h1p[[i]]$Summary$coefficients[2,5]
+    h_betas$BS_Pval[h_betas$Hazard == 0.01 & h_betas$Time %in% start:end] = h1p[[i]]$Summary$coefficients[3,5]
+    
+    # Inter Hazard p-values
+    h_betas$Sup_Pval[h_betas$Hazard == 0.3 & h_betas$Time %in% start:end] = h3p[[i]]$Summary$coefficients[2,5]
+    h_betas$BS_Pval[h_betas$Hazard == 0.3 & h_betas$Time %in% start:end] = h3p[[i]]$Summary$coefficients[3,5]
+    
+    # High Hazard p-values
+    h_betas$Sup_Pval[h_betas$Hazard == 0.99 & h_betas$Time %in% start:end] = h9p[[i]]$Summary$coefficients[2,5]
+    h_betas$BS_Pval[h_betas$Hazard == 0.99 & h_betas$Time %in% start:end] = h9p[[i]]$Summary$coefficients[3,5]
+    
+    start = start+bsize
+  }
+  return(h_betas)
+}
+
+h_all_betas = getAllBetas(120,h1_pup_deriv,h3_pup_deriv,h9_pup_deriv,h1_pup_deriv_ps,h3_pup_deriv_ps,h9_pup_deriv_ps,bsize,120/bsize)
+h_all_betas$Hazard = factor(h_all_betas$Hazard, labels = c("H = 0.01","H = 0.3","H = 0.99"))
+
+h_all_betas.m = ddply(h_all_betas,.(Hazard,Time),summarize,
+                      MSurprise = mean(Surprise),
+                      Sup_MSE = mean_se(Surprise)[[2]],
+                      Sup_PSE = mean_se(Surprise)[[3]],
+                      BeliefStrength = mean(L_Bayes_Prior_Ab),
+                      BS_MSE = mean_se(L_Bayes_Prior_Ab)[[2]],
+                      BS_PSE = mean_se(L_Bayes_Prior_Ab)[[3]],
+                      Sup_P = mean(Sup_Pval),
+                      BS_P = mean(BS_Pval))
+
+pthresh = .05/bsize
+h_all_betas.m$Sup_P_Y = ifelse(h_all_betas.m$Sup_P < pthresh,.156,NA)
+h_all_betas.m$BS_P_Y = ifelse(h_all_betas.m$BS_P < pthresh,.151,NA)
+
+# Save plot of pupil derivative
+plt = ggplot(h_all_betas.m)+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_ribbon(aes(x = Time,ymin=Sup_MSE,ymax=Sup_PSE,fill=Hazard),alpha=.3)+
+  geom_line(aes(Time,MSurprise,color=Hazard),linetype=2,size=1)+
+  geom_ribbon(aes(x = Time,ymin=BS_MSE,ymax=BS_PSE,fill=Hazard),alpha=.3)+
+  geom_line(aes(Time,BeliefStrength,color=Hazard),linetype=1,size=1)+
+  geom_line(aes(Time,Sup_P_Y,color=Hazard),linetype=2)+
+  geom_line(aes(Time,BS_P_Y,color=Hazard),linetype=1)+
+  ylab('Pupil Derivative Beta Weight')+
+  xlab('Time from Tone Onset (sec)')+
+  scale_x_continuous(breaks=c(0,60,120),labels=c(0,1,2))+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  facet_wrap(~Hazard)+
+    theme(
+      legend.position = 'none',
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=14,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+ggsave('./F3S2_Sup_BS_deriv_beta.pdf',plt,width=9,height=4)
+```

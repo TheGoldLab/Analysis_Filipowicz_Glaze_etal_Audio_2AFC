@@ -1,0 +1,548 @@
+#Process pupil and behavioral data for Auditory 2AFC task
+
+This script takes processed behavioral, simulation, pupil, and fit data and puts it all into one place so that it can be used in the figure/analysis data frames
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load trial by trial pupil data
+pdat = fread('../data/pdat.csv',sep=',')
+```
+
+Figure 2b - Influence of switches on baseline pupil diameter
+```{r}
+getBaseRSwlme = function(dat,h){
+  # Function to get beta weights from linear mixed effects model for baseline before tone
+  # Convert to data frame and subset hazard rate
+  dat2 = data.frame(dat)
+  pdat.base = subset(dat2,Hazard == h)
+  
+  # Scale variables for analysis
+  pdat.base$Baseline = scale(pdat.base$Baseline)
+  pdat.base$Change_1 = scale(pdat.base$Change_1)
+  pdat.base$StimSwitch = scale(pdat.base$StimSwitch)
+  pdat.base$RespSwitch = scale(pdat.base$RespSwitch)
+
+  # Run linear mixed effects model
+  base.rsw.lme = lmer(Baseline~StimSwitch+RespSwitch+Change_1+
+                           (1|Subject)+(1+StimSwitch|Subject)+(1+RespSwitch|Subject)+(1+Change_1|Subject),
+                         pdat.base,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  
+  # Save model summary and coefficients
+  base.coef = data.frame(coef(base.rsw.lme)$Subject)
+  base.coef$Subject = row.names(base.coef)
+  base.coef$Hazard = h
+  return(list(Summary = summary(base.rsw.lme), Betas = base.coef))
+}
+
+# Get beta weights for each hazard rate
+h1_base_rsw_lme = getBaseRSwlme(pdat,0.01)
+h3_base_rsw_lme = getBaseRSwlme(pdat,0.3)
+h9_base_rsw_lme = getBaseRSwlme(pdat,0.99)
+
+# Plot results
+h_base_rsw = rbind(h1_base_rsw_lme$Betas,h3_base_rsw_lme$Betas,h9_base_rsw_lme$Betas)
+h_base_rsw$Hazard = factor(h_base_rsw$Hazard,levels=c(0.01,.3,.99),labels=c("H = 0.01","H = 0.3", "H = 0.99"))
+h_base_rsw.long = gather(h_base_rsw,Type,Beta,StimSwitch:RespSwitch)
+h_base_rsw.long$Type = factor(h_base_rsw.long$Type,levels=c("StimSwitch","RespSwitch"),labels=c('Tone Switch','Prediction Switch'))
+
+base_rsw_plt = ggplot(subset(h_base_rsw.long,is.na(Type)==0),aes(Type,Beta,color=Hazard,fill=Hazard,alpha=Type))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_boxplot()+
+  scale_alpha_manual(values=c(0,.7))+
+  facet_wrap(~Hazard)+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab("Baseline Beta")+
+  ggtitle('Baseline After Tone')+
+  ylim(c(-.2,.2))+
+    theme(
+      legend.position = 'none',
+      plot.title = element_text(size=18,face='bold',hjust=.5),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.text.x = element_text(size=12,color='black',angle=315,vjust=0.5,hjust=0),
+      axis.title.y = element_text(size=14,color='black'),
+      axis.title.x = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+base_rsw_plt
+ggsave('./base_rsw.pdf',plot=base_rsw_plt,width = 4,height=5)
+```
+
+Figure 2c - Influence of switches on next baseline pupil diameter
+```{r}
+getBase1RSwlme = function(dat,h){
+  # Function to get beta weights from linear mixed effects model for baseline after tone
+  # Convert to data frame and subset hazard rate
+  dat2 = data.frame(dat)
+  pdat.base1 = subset(dat2,Hazard == h)
+  
+  # Scale variables for analysis
+  pdat.base1$Baseline_plus_1 = scale(pdat.base1$Baseline_plus_1)
+  pdat.base1$Change = scale(pdat.base1$Change)
+  pdat.base1$StimSwitch = scale(pdat.base1$StimSwitch)
+  pdat.base1$RespSwitch = scale(pdat.base1$RespSwitch)
+  
+  # Run linear mixed effects model
+  base1.rsw.lme = lmer(Baseline_plus_1~StimSwitch+RespSwitch+Change+
+                           (1|Subject)+(1+StimSwitch|Subject)+(1+RespSwitch|Subject)+(1+Change|Subject),
+                         pdat.base1,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  
+  # Save model summary and coefficients
+  base1.coef = data.frame(coef(base1.rsw.lme)$Subject)
+  base1.coef$Subject = row.names(base1.coef)
+  base1.coef$Hazard = h
+  return(list(Summary = summary(base1.rsw.lme), Betas = base1.coef))
+}
+
+# Get beta weights for each hazard rate
+h1_base1_rsw_lme = getBase1RSwlme(pdat,0.01)
+h3_base1_rsw_lme = getBase1RSwlme(pdat,0.3)
+h9_base1_rsw_lme = getBase1RSwlme(pdat,0.99)
+
+# Plot results
+h_base1_rsw = rbind(h1_base1_rsw_lme$Betas,h3_base1_rsw_lme$Betas,h9_base1_rsw_lme$Betas)
+h_base1_rsw$Hazard = factor(h_base1_rsw$Hazard,levels=c(0.01,.3,.99),labels=c("H = 0.01","H = 0.3", "H = 0.99"))
+h_base1_rsw.long = gather(h_base1_rsw,Type,Beta,StimSwitch:RespSwitch)
+h_base1_rsw.long$Type = factor(h_base1_rsw.long$Type,levels=c("StimSwitch","RespSwitch"),labels=c('Tone Switch','Prediction Switch'))
+
+base1_rsw_plt = ggplot(subset(h_base1_rsw.long,is.na(Type)==0),aes(Type,Beta,color=Hazard,fill=Hazard,alpha=Type))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_boxplot()+
+  scale_alpha_manual(values=c(0,.7))+
+  facet_wrap(~Hazard)+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab("Baseline Beta")+
+  ggtitle('Baseline After Tone')+
+  ylim(c(-.2,.2))+
+    theme(
+      legend.position = 'none',
+      plot.title = element_text(size=18,face='bold',hjust=.5),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.text.x = element_text(size=12,color='black',angle=315,vjust=0.5,hjust=0),
+      axis.title.y = element_text(size=14,color='black'),
+      axis.title.x = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+base1_rsw_plt
+ggsave('./base1_rsw.pdf',plot=base1_rsw_plt,width = 4,height=5)
+```
+
+
+
+Compute the beta weights for each sample from tone onset (evoked change = EC)
+```{r}
+# Function to get beta values for individual sample points from tone onset
+getECBeta = function(dat,h){
+  # INPUT:
+  # dat - pupil data frame with the particular sample you want in index position 8
+  # h - hazard rate
+  d = subset(dat,Hazard == h)
+  names(d)[8] = 'Pupil'
+  d$PupilDiff = d$Pupil-d$Baseline
+  
+  # Scale variables
+  d$PupilDiff = scale(d$PupilDiff)
+  d$StimSwitch = scale(d$StimSwitch)
+  d$RespSwitch = scale(d$RespSwitch)
+  d$Baseline = scale(d$Baseline)
+  d$Baseline_1 = scale(d$Baseline_1)
+  d$Change_1 = scale(d$Change_1)
+  
+  # Compute linear mixed effects for stimulus switch and non-switch
+  ec_lme = lmer(PupilDiff~StimSwitch*RespSwitch+Baseline+Baseline_1+Change_1+
+                  (1|Subject)+(1+StimSwitch*RespSwitch|Subject)+(1+Baseline|Subject)+(1+Baseline_1|Subject)+(1+Change_1|Subject),
+                d,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  df = coef(base_lme)$Subject
+  df$Subject =row.names(df)
+  df$Hazard = h  
+  return(list(summary(ec_lme),df))  
+}
+
+# Compute LMEs for 120 timepoints after tone onset - takes ~ 6 hours on a quadcore macbook pro
+pdat_ec = pdat[,c(2,4,9,11,140,143,145,20:139)]
+ncores = 8
+cl = makeCluster(ncores)
+clusterExport(cl = cl,varlist = c('getECBeta','pdat_ec','lmer','lmerControl','scale'))
+h1.sw.rsw.samples = parLapply(cl,1:120,function(x) getECBeta(pdat_ec[pdat_ec$Hazard == 0.01,c(1:7,7+x)]))
+saveRDS(base_sw_rsw_h,'./ec_sw_rsw_h1.rds')
+h3.sw.rsw.samples = parLapply(cl,1:120,function(x) getECBeta(pdat_ec[pdat_ec$Hazard == 0.3,c(1:7,7+x)]))
+saveRDS(base_sw_rsw_h,'./ec_sw_rsw_h3.rds')
+h9.sw.rsw.samples = parLapply(cl,1:120,function(x) getECBeta(pdat_ec[pdat_ec$Hazard == 0.99,c(1:7,7+x)]))
+saveRDS(base_sw_rsw_h,'./ec_sw_rsw_h9.rds')
+stopCluster(cl)
+```
+
+Evoked change effects - get p-values
+```{r}
+#Get significance values for 10 different time points after stim onset
+# Not the cleanest....but get everage pupil for 10 equal time points
+pdat_ec_rsw = pdat[,c(2,4,9,11,140,143,145,20:139)]
+pdat_ec_rsw[,("Hazard"):= factor(pdat_ec_rsw$Hazard,labels=c("H = .01","H = .3","H = .99"))]
+pdat_ec_rsw = data.frame(pdat_ec_rsw)
+intervals = seq(9,128,120/10)
+library(parallel)
+cl = makeCluster(8)
+clusterExport(cl = cl,varlist = c('pdat_ec_rsw','lapply','intervals'))
+pdat_ec_rsw$T1 = parSapply(cl,1:length(pdat_ec_rsw$Sample10), function(x) mean(as.numeric(pdat_ec_rsw[x,intervals[1]:intervals[1]+11])-pdat_ec_rsw$Baseline[x],na.rm=T))
+pdat_ec_rsw$T2 = parSapply(cl,1:length(pdat_ec_rsw$Sample10), function(x) mean(as.numeric(pdat_ec_rsw[x,intervals[2]:intervals[2]+11])-pdat_ec_rsw$Baseline[x],na.rm=T))
+pdat_ec_rsw$T3 = parSapply(cl,1:length(pdat_ec_rsw$Sample10), function(x) mean(as.numeric(pdat_ec_rsw[x,intervals[3]:intervals[3]+11])-pdat_ec_rsw$Baseline[x],na.rm=T))
+pdat_ec_rsw$T4 = parSapply(cl,1:length(pdat_ec_rsw$Sample10), function(x) mean(as.numeric(pdat_ec_rsw[x,intervals[4]:intervals[4]+11])-pdat_ec_rsw$Baseline[x],na.rm=T))
+pdat_ec_rsw$T5 = parSapply(cl,1:length(pdat_ec_rsw$Sample10), function(x) mean(as.numeric(pdat_ec_rsw[x,intervals[5]:intervals[5]+11])-pdat_ec_rsw$Baseline[x],na.rm=T))
+pdat_ec_rsw$T6 = parSapply(cl,1:length(pdat_ec_rsw$Sample10), function(x) mean(as.numeric(pdat_ec_rsw[x,intervals[6]:intervals[6]+11])-pdat_ec_rsw$Baseline[x],na.rm=T))
+pdat_ec_rsw$T7 = parSapply(cl,1:length(pdat_ec_rsw$Sample10), function(x) mean(as.numeric(pdat_ec_rsw[x,intervals[7]:intervals[7]+11])-pdat_ec_rsw$Baseline[x],na.rm=T))
+pdat_ec_rsw$T8 = parSapply(cl,1:length(pdat_ec_rsw$Sample10), function(x) mean(as.numeric(pdat_ec_rsw[x,intervals[8]:intervals[8]+11])-pdat_ec_rsw$Baseline[x],na.rm=T))
+pdat_ec_rsw$T9 = parSapply(cl,1:length(pdat_ec_rsw$Sample10), function(x) mean(as.numeric(pdat_ec_rsw[x,intervals[9]:intervals[9]+11])-pdat_ec_rsw$Baseline[x],na.rm=T))
+pdat_ec_rsw$T10 = parSapply(cl,1:length(pdat_ec_rsw$Sample10), function(x) mean(as.numeric(pdat_ec_rsw[x,intervals[10]:intervals[10]+11])-pdat_ec_rsw$Baseline[x],na.rm=T))
+stopCluster(cl)
+
+pdat_ec_rsw_ps = pdat_ec_rsw[,c(1:7,128:137)]
+#Get summary for stim and resp switch for each mean timepoint
+getPupilSumm = function(dat){
+  names(dat)[7] = 'PupilDiff'
+  dat$StimSwitch = scale(dat$StimSwitch)
+  dat$RespSwitch = scale(dat$RespSwitch)
+  dat$PupilDiff = scale(dat$PupilDiff)
+  dat$Baseline = scale(dat$Baseline)
+  dat$Baseline_1 = scale(dat$Baseline_1)
+  dat$Change_1 = scale(dat$Change_1)
+
+  # Linear mixed effects model
+  dat.lme = lmer(PupilDiff~RespSwitch*StimSwitch+Baseline+Baseline_1+Change_1+
+                     (1|Subject)+(1+RespSwitch*StimSwitch|Subject)+(1+Baseline|Subject)+(1+Baseline_1|Subject)+(1+Change_1|Subject),
+                   dat,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))   
+  return(summary(dat.lme))
+}
+
+#Separate 120 samples into 10 different time points
+library(parallel)
+cl = makeCluster(8)
+clusterExport(cl = cl,varlist = c('pdat_ec_rsw_ps','getPupilSumm','lmer','lmerControl','scale'))
+h1_rsw_ps = parLapply(cl,1:10,function(x) getPupilSumm(pdat_ec_rsw_ps[pdat_ec_rsw_ps$Hazard == 'H = .01',c(1:7,7+x)],rt=F))
+saveRDS(h1_rsw_ps,'./h1_rsw_ps.rds')
+h3_rsw_ps = parLapply(cl,1:10,function(x) getPupilSumm(pdat_ec_rsw_ps[pdat_ec_rsw_ps$Hazard == 'H = .3',c(1:7,7+x)],rt=F))
+saveRDS(h3_rsw_ps,'./h3_rsw_ps.rds')
+h9_rsw_ps = parLapply(cl,1:10,function(x) getPupilSumm(pdat_ec_rsw_ps[pdat_ec_rsw_ps$Hazard == 'H = .99',c(1:7,7+x)],rt=F))
+saveRDS(h9_rsw_ps,'./h9_rsw_ps.rds')
+stopCluster(cl)
+```
+
+
+```{r}
+# Evoked change - load previously computed samples
+
+# Load beta weights for each hazard rate
+h1.sw.rsw.samples = readRDS('./ec_sw_rsw_h1.rds')
+h3.sw.rsw.samples = readRDS('./ec_sw_rsw_h3.rds')
+h9.sw.rsw.samples = readRDS('./ec_sw_rsw_h9.rds')
+
+# Load p-values for 10 time points
+h1_rsw_ps = readRDS('./h1_rsw_ps.rds')
+h3_rsw_ps = readRDS('./h3_rsw_ps.rds')
+h9_rsw_ps = readRDS('./h9_rsw_ps.rds')
+
+# Function to extract previously computed beta weights
+getSampleBetas = function(samples,h){
+  
+  # Ugly...but vectors to extract beta weights
+  # Tone switch beta weights (mean and plus/minus standard errors)
+  betas.sw = c()
+  betas.sw.mse = c()
+  betas.sw.pse = c()
+  
+  # Response switch beta weights (mean and plus/minus standard errors)
+  betas.rsw = c()
+  betas.rsw.mse = c()
+  betas.rsw.pse = c()
+
+  for(i in 1:length(samples[1,])){
+    betas = samples[,i][[1]]
+    coefs = samples[,i][[2]]
+    
+    betas.sw[i] = betas$coefficients[2,1]
+    betas.sw.mse[i] = mean_se(coefs$StimSwitch)[[2]]
+    betas.sw.pse[i] = mean_se(coefs$StimSwitch)[[3]]
+    
+    betas.rsw[i] = betas$coefficients[3,1]
+    betas.rsw.mse[i] = mean_se(coefs$RespSwitch)[[2]]
+    betas.rsw.pse[i] = mean_se(coefs$RespSwitch)[[3]]
+  }
+  return(data.frame(Hazard=rep(h,length(samples[1,])*2),
+                    Sample = rep(0:119,2),
+                    Factor = c(rep("Stim",length(samples[1,])),rep("Resp",length(samples[1,]))),
+                    Betas = c(betas.sw,betas.rsw),
+                    mse = c(betas.sw.mse,betas.rsw.mse),
+                    pse = c(betas.sw.pse,betas.rsw.pse)))
+}
+
+# Function to extract p values in the 10 time points
+getBinPval = function(samples,ps){
+  samps = unique(samples$Sample)
+  #Tone Switch
+  stimind = 1
+  for(i in 1:length(samps)){
+    samples$Ps[samples$Factor == 'Stim' & samples$Sample == samps[i]] = ps[[stimind]]$coefficients[3,5]
+    if(i%%12 == 0){
+      stimind = stimind + 1
+    }
+  }
+  
+  #Resp Switch
+  respind = 1
+  for(i in 1:length(samps)){
+    samples$Ps[samples$Factor == 'Resp' & samples$Sample == samps[i]] = ps[[respind]]$coefficients[2,5]
+    if(i%%12 == 0){
+      respind = respind + 1
+    }
+  }
+  return(samples)
+}
+
+# Use funtions above to extract beta weights and p-values
+h1.samples.df = getSampleBetas(h1.sw.rsw.samples,"H = .01")
+h3.samples.df = getSampleBetas(h3.sw.rsw.samples,"H = .3")
+h9.samples.df = getSampleBetas(h9.sw.rsw.samples,"H = .99")
+
+h1.samples.df = getBinPval(h1.samples.df,h1_rsw_ps)
+h3.samples.df = getBinPval(h3.samples.df,h3_rsw_ps)
+h9.samples.df = getBinPval(h9.samples.df,h9_rsw_ps)
+
+# Add columns to indicate p-values that reach significance
+h.samples.df = rbind(h1.samples.df,h3.samples.df,h9.samples.df)
+h.samples.df$Sig[h.samples.df$Hazard %in% c('H = .01','H = .3') &h.samples.df$Factor == 'Stim' & h.samples.df$Ps < (.05/10)] = .11
+h.samples.df$Sig[h.samples.df$Hazard %in% c('H = .01','H = .3') &h.samples.df$Factor == 'Resp' & h.samples.df$Ps < (.05/10)] = .1
+h.samples.df$Sig[h.samples.df$Hazard %in% c('H = .99') &h.samples.df$Factor == 'Stim' & h.samples.df$Ps < (.05/10)] = -.06
+h.samples.df$Sig[h.samples.df$Hazard %in% c('H = .99') &h.samples.df$Factor == 'Resp' & h.samples.df$Ps < (.05/10)] = -.07
+
+# Plot
+samp.beta.plt = ggplot(h.samples.df,aes(Sample,Betas,alpha=Factor))+
+  geom_hline(yintercept=c(0),linetype=3,alpha=.6)+
+  geom_ribbon(aes(x=Sample,ymin=mse,ymax=pse,linetype=Factor,color=Hazard,fill=Hazard))+
+  geom_line(aes(color=Hazard,linetype=Factor),alpha=1,size=1)+
+  geom_line(aes(x = Sample,y=Sig,linetype=Factor,color=Hazard),size=1,alpha=1)+
+  facet_wrap(~Hazard)+
+  ylab('Evoked Change Beta')+
+  xlab('Time from Tone Onset (sec)')+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_alpha_manual(values=c(.6,.3,0))+
+  scale_x_continuous(breaks=c(0,60,119),label=c(0,1,2))+
+  scale_linetype_manual(values=c(1,2,3))+
+  ylim(c(-.07,.11))+
+    theme(
+      legend.position='none',
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+samp.beta.plt
+ggsave('./ec_rsw.pdf',plot=samp.beta.plt,width = 10,height=5.2)
+```
+
+Baseline and next baseline
+```{r}
+# Get means beta weights and standard errors for each switch type for each hazard rate
+halls = list(h1.sw.rsw.all,h3.sw.rsw.all,h9.sw.rsw.all)
+
+# means for baseline before hearing tone
+b.means = c()
+b.mse = c()
+b.pse = c()
+b.ts = c()
+
+#means for next baseline
+b1.means = c()
+b1.mse = c()
+b1.pse = c()
+b1.ts = c()
+ind = 1
+for(i in 1:3){
+  h.sw.rsw = halls[[i]]
+  b.means[ind:(ind+2)] = c(mean(h.sw.rsw[,1][[3]]$StimSwitch),mean(h.sw.rsw[,1][[3]]$RespSwitch),mean(h.sw.rsw[,1][[3]]$StimSwitch.RespSwitch))
+  b.mse[ind:(ind+2)] = c(mean_se(h.sw.rsw[,1][[3]]$StimSwitch)[[2]],mean_se(h.sw.rsw[,1][[3]]$RespSwitch)[[2]],mean_se(h.sw.rsw[,1][[3]]$StimSwitch.RespSwitch)[[2]])
+  b.pse[ind:(ind+2)] = c(mean_se(h.sw.rsw[,1][[3]]$StimSwitch)[[3]],mean_se(h.sw.rsw[,1][[3]]$RespSwitch)[[3]],mean_se(h.sw.rsw[,1][[3]]$StimSwitch.RespSwitch)[[3]])
+  b.ts[ind:(ind+2)] = c(h.sw.rsw[,1][[2]]$coefficients[2,5],h.sw.rsw[,1][[2]]$coefficients[3,5],h.sw.rsw[,1][[2]]$coefficients[6,5])
+  
+  b1.means[ind:(ind+2)] = c(mean(h.sw.rsw[,4][[3]]$StimSwitch),mean(h.sw.rsw[,4][[3]]$RespSwitch),mean(h.sw.rsw[,4][[3]]$StimSwitch.RespSwitch))
+  b1.mse[ind:(ind+2)] = c(mean_se(h.sw.rsw[,4][[3]]$StimSwitch)[[2]],mean_se(h.sw.rsw[,4][[3]]$RespSwitch)[[2]],mean_se(h.sw.rsw[,4][[3]]$StimSwitch.RespSwitch)[[2]])
+  b1.pse[ind:(ind+2)] = c(mean_se(h.sw.rsw[,4][[3]]$StimSwitch)[[3]],mean_se(h.sw.rsw[,4][[3]]$RespSwitch)[[3]],mean_se(h.sw.rsw[,4][[3]]$StimSwitch.RespSwitch)[[3]])
+  b1.ts[ind:(ind+2)] = c(h.sw.rsw[,4][[2]]$coefficients[2,5],h.sw.rsw[,4][[2]]$coefficients[3,5],h.sw.rsw[,4][[2]]$coefficients[6,5])
+  ind = ind+3
+}
+
+base.bb = data.frame(Hazard = c(rep('H = .01',3),rep('H = .3',3),rep('H = .99',3)),
+                  Factor = rep(c('Stim','Resp','StimxResp'),3),
+                  Betas = b.means,
+                  MSE = b.mse,
+                  PSE = b.pse,
+                  Ts = b.ts)
+
+base1.bb = data.frame(Hazard = c(rep('H = .01',3),rep('H = .3',3),rep('H = .99',3)),
+                  Factor = rep(c('Stim','Resp','StimxResp'),3),
+                  Betas = b1.means,
+                  MSE = b1.mse,
+                  PSE = b1.pse,
+                  Ts = b1.ts)
+
+base.beta.plt = ggplot(subset(base.bb,Factor %in% c('Stim','Resp')),aes(Factor,Betas, alpha=Factor,color=Hazard,fill=Hazard))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_bar(stat='identity')+
+  geom_errorbar(aes(x=Factor,ymin=MSE,ymax=PSE),width=0,size=2,alpha = 1,color='black')+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_alpha_manual(values=c(1,.3))+
+  facet_wrap(~Hazard)+
+    theme(
+      legend.position='none',
+      axis.text.y = element_text(size=12,color='black'),
+      axis.text.x = element_text(size=12,color='black',angle=315,vjust=0.5,hjust=0),
+      axis.title.y = element_text(size=14,color='black'),
+      axis.title.x = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+ggsave('/Users/alsfilip/Dropbox/Penn/Auditory_2AFC/Auditory_2AFC/Figures/Fig3_pieces/Baseline_Betas.pdf',plot=base.beta.plt,height = 5.2,width = 4.5)
+
+base1.beta.plt=ggplot(subset(base1.bb,Factor %in% c('Stim','Resp')),aes(Factor,Betas,alpha=Factor,color=Hazard,fill=Hazard))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_bar(stat='identity')+
+  geom_errorbar(aes(x=Factor,ymin=MSE,ymax=PSE),width=0,size=2,alpha=1,color='black')+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_alpha_manual(values=c(1,.3))+
+  facet_wrap(~Hazard)+
+    theme(
+      legend.position='none',
+      axis.text.y = element_text(size=12,color='black'),
+      axis.text.x = element_text(size=12,color='black',angle=315,vjust=0.5,hjust=0),
+      axis.title.y = element_text(size=14,color='black'),
+      axis.title.x = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+ggsave('/Users/alsfilip/Dropbox/Penn/Auditory_2AFC/Auditory_2AFC/Figures/Fig3_Pieces/Baseline1_Betas.pdf',plot=base1.beta.plt,height = 5.2,width = 4.5)
+```
+
+Evoked change
+```{r}
+#Plot sample by sample
+getSampleBetas = function(samples,h){
+  betas.sw = c()
+  betas.sw.mse = c()
+  betas.sw.pse = c()
+  
+  betas.rsw = c()
+  betas.rsw.mse = c()
+  betas.rsw.pse = c()
+  
+  betas.sw.rsw = c()
+  betas.sw.rsw.mse = c()
+  betas.sw.rsw.pse = c()
+  
+  ts.sw = c()
+  ts.rsw = c()
+  ts.sw.rsw = c()
+  for(i in 1:length(samples[1,])){
+    betas = samples[,i][[1]]
+    coefs = samples[,i][[2]]
+    
+    betas.sw[i] = betas$coefficients[2,1]
+    betas.sw.mse[i] = mean_se(coefs$StimSwitch)[[2]]
+    betas.sw.pse[i] = mean_se(coefs$StimSwitch)[[3]]
+    
+    betas.rsw[i] = betas$coefficients[3,1]
+    betas.rsw.mse[i] = mean_se(coefs$RespSwitch)[[2]]
+    betas.rsw.pse[i] = mean_se(coefs$RespSwitch)[[3]]
+    
+    betas.sw.rsw[i] = betas$coefficients[7,1]
+    betas.sw.rsw.mse[i] = mean_se(coefs$StimSwitch.RespSwitch)[[2]]
+    betas.sw.rsw.pse[i] = mean_se(coefs$StimSwitch.RespSwitch)[[3]]
+    
+    ts.sw[i] = betas$coefficients[2,5]
+    ts.rsw[i] = betas$coefficients[3,5]
+    ts.sw.rsw[i] = betas$coefficients[7,5]
+  }
+  return(data.frame(Hazard=rep(h,length(samples[1,])*3),
+                    Sample = rep(0:119,3),
+                    Factor = c(rep("Stim",length(samples[1,])),rep("Resp",length(samples[1,])),rep("StimxResp",length(samples[1,]))),
+                    Betas = c(betas.sw,betas.rsw,betas.sw.rsw),
+                    mse = c(betas.sw.mse,betas.rsw.mse,betas.sw.rsw.mse),
+                    pse = c(betas.sw.pse,betas.rsw.pse,betas.sw.rsw.pse),
+                    Ts = c(ts.sw,ts.rsw,ts.sw.rsw)))
+  }
+
+h1.samples.df = getSampleBetas(h1.sw.rsw.samples,"H = .01")
+h3.samples.df = getSampleBetas(h3.sw.rsw.samples,"H = .3")
+h9.samples.df = getSampleBetas(h9.sw.rsw.samples,"H = .99")
+
+h.samples.df = rbind(h1.samples.df,h3.samples.df,h9.samples.df)
+h.samples.df$Sig[h.samples.df$Hazard %in% c('H = .01','H = .3') &h.samples.df$Factor == 'Stim' & h.samples.df$Ts < (.05/10)] = .11
+h.samples.df$Sig[h.samples.df$Hazard %in% c('H = .01','H = .3') &h.samples.df$Factor == 'Resp' & h.samples.df$Ts < (.05/10)] = .1
+h.samples.df$Sig[h.samples.df$Factor == 'StimxResp' & h.samples.df$Ts < (1/120)] = -.09
+h.samples.df$Sig[h.samples.df$Hazard %in% c('H = .99') &h.samples.df$Factor == 'Stim' & h.samples.df$Ts < (.05/10)] = -.07
+h.samples.df$Sig[h.samples.df$Hazard %in% c('H = .99') &h.samples.df$Factor == 'Resp' & h.samples.df$Ts < (.05/10)] = -.06
+
+
+samp.beta.plt = ggplot(subset(h.samples.df,Factor %in% c('Stim','Resp')),aes(Sample,Betas,alpha=Factor))+
+  geom_hline(yintercept=c(0),linetype=2,size=1,alpha=.6)+
+  geom_ribbon(aes(x=Sample,ymin=mse,ymax=pse,linetype=Factor,color=Hazard,fill=Hazard))+
+  geom_line(aes(color=Hazard,linetype=Factor),alpha=1,size=1)+
+  geom_line(aes(x = Sample,y=Sig,linetype=Factor,color=Hazard),size=1,alpha=1)+
+  facet_wrap(~Hazard)+
+  ylab('Beta Weight')+
+  xlab('Time from Tone Onset (sec)')+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_alpha_manual(values=c(.6,.3,0))+
+  scale_x_continuous(breaks=c(0,60,119),label=c(0,1,2))+
+  scale_linetype_manual(values=c(1,2,3))+
+  ylim(c(-.07,.11))+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=12,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+ggsave(paste0(root,'Figures/Fig3_pieces/Samples_Betas.pdf'),plot=samp.beta.plt,width = 9,height=4)
+```
+

@@ -1,0 +1,121 @@
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load trial by trial pupil data
+pdat = fread('../data/pdat.csv',sep=',')
+
+# Load complexity values
+cx = fread('../data/Complexity_Correct.csv',sep=',')
+```
+
+Get baseline and evoked change residuals
+```{r}
+#Get residuals and see how they relate to switch
+pdat.resid = pdat[,.(Subject,Hazard,Baseline,Change,Baseline_plus_1, Baseline_1, Change_1, StimSwitch)]
+# Scale variables
+pdat.resid[,("Hazard") := factor(pdat.resid$Hazard,levels=c(.01,.3,.99),labels=c('H = .01','H = .3','H = .99'))]
+pdat.resid[,("Baseline") := scale(pdat.resid$Baseline)]
+pdat.resid[,("Change") := scale(pdat.resid$Change)]
+pdat.resid[,("Baseline_1") := scale(pdat.resid$Baseline_1)]
+pdat.resid[,("Change_1") := scale(pdat.resid$Change_1)]
+pdat.resid[,("Baseline_plus_1") := scale(pdat.resid$Baseline_plus_1)]
+
+# Baseline residuals
+resid.base.lme = lmer(Baseline_plus_1~Change+
+                        (1|Subject)+(1+Change|Subject),
+                      pdat.resid,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+r.b.summ = summary(resid.base.lme)
+r.b.idx = as.numeric(names(r.b.summ$resid))
+pdat.resid[r.b.idx,('Baseline_resid') := as.numeric(r.b.summ$residuals)]
+
+# Evoked change residuals
+resid.ec.lme = lmer(Change~Baseline+Change_1+Baseline_1+(1|Subject)+(1+Baseline|Subject)+(1+Change_1|Subject)+(1+Baseline_1),pdat.resid,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+r.ec.summ = summary(resid.ec.lme)
+r.ec.idx = as.numeric(names(r.ec.summ$resid))
+pdat.resid[r.ec.idx,('Change_resid') := as.numeric(r.ec.summ$residuals)]
+
+#Difference in surprise between switch and non-switch per subject by complexity by hazard rate
+switch_diff.p = ddply(subset(pdat.resid,!is.na(StimSwitch)),.(Subject,Hazard,StimSwitch),summarize,Base = mean(Baseline_resid,na.rm=T),Change = mean(Change_resid,na.rm=T))
+```
+
+Difference in baseline residuals on stimulus switch - stimulus repeat trials
+```{r}
+# Get baseline differences
+switch_diff_base = spread(switch_diff.p[,1:4],StimSwitch,Base)
+switch_diff_base$SwitchBaseDiff = switch_diff_base$`1`-switch_diff_base$`0`
+switch_diff_base = merge(switch_diff_base,cx[,.(Subject,Complexity)])
+
+#Plot
+base_sw_plt = ggplot(switch_diff_base,aes(Complexity,SwitchBaseDiff,color=Hazard))+
+  geom_hline(yintercept = c(0),linetype=3,color='black')+
+  geom_smooth(method='lm',se=F,color='black')+
+  geom_point(size=4,alpha=.1)+
+  geom_point(size=4,shape=1,stroke=.75)+
+  ylab('Baseline Residuals\nTone Switch minus Tone Repeat')+
+  xlab('Complexity')+
+  ggtitle('Baseline')+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_x_continuous(breaks=c(0,.2,.4))+
+  facet_wrap(~Hazard)+
+  theme(
+    legend.position = 'none',
+    axis.text.x = element_text(size=12,color='black'),
+    axis.text.y = element_text(size=12,color='black'),
+    axis.title = element_text(size=14,color='black'),
+    strip.background = element_blank(),
+    strip.text = element_text(size=16,face='bold'),
+    plot.title = element_text(hjust=.5,size=18),
+    axis.line.x = element_line(size = .5,color="black"),
+    axis.line.y = element_line(size=.5,color="black"),
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+    )
+base_sw_plt
+ggsave('./Fig7a_baseline.pdf',plot=base_sw_plt,height=4,width=9)
+```
+
+Difference in evoked change residuals on stimulus switch - stimulus repeat trials
+```{r}
+# Get baseline differences
+switch_diff_ec = spread(switch_diff.p[,c(1,2,3,5)],StimSwitch,Change)
+switch_diff_ec$SwitchBaseDiff = switch_diff_ec$`1`-switch_diff_ec$`0`
+switch_diff_ec = merge(switch_diff_ec,cx[,.(Subject,Complexity)])
+
+#Plot
+ec_sw_plt = ggplot(switch_diff_ec,aes(Complexity,SwitchBaseDiff,color=Hazard))+
+  geom_hline(yintercept = c(0),linetype=3,color='black')+
+  geom_smooth(method='lm',se=F,color='black')+
+  geom_point(size=4,alpha=.1)+
+  geom_point(size=4,shape=1,stroke=.75)+
+  ylab('Evoked Change Residuals\nTone Switch minus Tone Repeat')+
+  xlab('Complexity')+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_x_continuous(breaks=c(0,.2,.4))+
+  ggtitle('Evoked Change')+
+  facet_wrap(~Hazard)+
+  theme(
+    legend.position = 'none',
+    axis.text.x = element_text(size=12,color='black'),
+    axis.text.y = element_text(size=12,color='black'),
+    axis.title = element_text(size=14,color='black'),
+    strip.background = element_blank(),
+    strip.text = element_text(size=16,face='bold'),
+    plot.title = element_text(hjust=.5,size=18),
+    axis.line.x = element_line(size = .5,color="black"),
+    axis.line.y = element_line(size=.5,color="black"),
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+    )
+ec_sw_plt
+ggsave('./Fig7b_change.pdf',plot=ec_sw_plt,height=4,width=9)
+```
+

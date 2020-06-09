@@ -1,0 +1,55 @@
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load trial by trial pupil data
+bdat = fread('../data/bdat.csv',sep=',')
+
+# Load complexity values
+cx = fread('../data/Complexity_Correct.csv',sep=',')
+
+# Get complexity terciles
+cx_terc = quantile(cx$Complexity,c(1/3,2/3))
+cx$Cx_Tercile[cx$Complexity <= cx_terc[[1]]] = 'Complexity <= .12'
+cx$Cx_Tercile[cx$Complexity > cx_terc[[1]] & cx$Complexity <= cx_terc[[2]]] = '.12 < Complexity <= .22'
+cx$Cx_Tercile[cx$Complexity > cx_terc[[2]]] = '.22 < Complexity'
+
+# Get per subject average behavior
+bdat.p = ddply(subset(bdat,!is.na(TSCP2)),.(Subject,H,TSCP2),summarize,Mcor = mean(Correct,na.rm=T))
+# Add tercile
+bdat.p = merge(bdat.p,cx[,.(Subject,Cx_Tercile)])
+# Get average per tercile
+bdat.cx.m = ddply(bdat.p,.(Cx_Tercile,H,TSCP2),summarize,Correct = mean(Mcor,na.rm=T),mse=mean_se(Mcor)[[2]],pse=mean_se(Mcor)[[3]])
+bdat.cx.m$Cx_Tercile = factor(bdat.cx.m$Cx_Tercile,levels=c('Complexity <= .12','.12 < Complexity <= .22','.22 < Complexity'))
+bdat.cx.m$Hazard = factor(bdat.cx.m$H)
+
+# Plot
+cx_terc_corr_plt = ggplot(bdat.cx.m,aes(TSCP2,Correct,ymin=mse,ymax=pse,color=Hazard,group=Hazard))+
+  geom_errorbar(width=.1)+
+  geom_point(size=3)+
+  geom_line()+
+  ylim(c(0,1))+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  xlab('Trial Since Source Switch' )+
+  ylab('Proportion Correct Responses')+
+  facet_wrap(~Cx_Tercile)+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=14,color='black',face='italic'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+cx_terc_corr_plt
+ggsave('./Fig4c.pdf',plot=cx_terc_corr_plt,width=10,height=4)
+```

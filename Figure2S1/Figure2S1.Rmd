@@ -1,0 +1,45 @@
+#Process pupil and behavioral data for Auditory 2AFC task
+
+This script takes processed behavioral, simulation, pupil, and fit data and puts it all into one place so that it can be used in the figure/analysis data frames
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load trial by trial pupil data
+pdat = fread('../data/pdat.csv',sep=',')
+
+# Calculate average pupil diamter across all subject from tone onset
+pdat.df = data.frame(pdat)
+pdat.pupil.ec = pdat.df[,c(2,20:139)]
+pdat.pupil.ec.long = gather(pdat.pupil.ec,Sample,Pupil,Sample7:Sample126)
+pdat.pupil.ec.p = ddply(pdat.pupil.ec.long,.(Subject,Sample),summarize,Mpupil = mean(Pupil,na.rm=T))
+pdat.pupil.ec.m = ddply(pdat.pupil.ec.p,.(Sample), summarize,Pupil = mean(Mpupil,na.rm=T),MSE = mean_se(Mpupil)[[2]], PSE = mean_se(Mpupil)[[3]])
+pdat.pupil.ec.m$Sample2 = as.numeric(substr(pdat.pupil.ec.m$Sample,7,nchar(pdat.pupil.ec.m$Sample)))-6
+
+pupil.ec.plt = ggplot(pdat.pupil.ec.m,aes(Sample2,Pupil,ymax=PSE,ymin=MSE))+
+  geom_ribbon(alpha=.3)+
+  geom_line()+
+  ylab('Pupil Diameter (z-score)')+
+  xlab('Time From Tone Onset (sec)')+
+  scale_x_continuous(breaks=c(0,60,120),labels=c(0,1,2))+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=12,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+pupil.ec.plt
+ggsave("./Figure2S1.pdf",plot=pupil.ec.plt,width = 7,height=4)
+```
+

@@ -1,0 +1,320 @@
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load trial by trial pupil data
+bdat = fread('../data/bdat.csv',sep=',')
+pdat = fread('../data/pdat.csv',sep=',')
+```
+
+#Simulated behavior from wide prior model
+```{r}
+# Support for hazard rate and states
+hspc = seq(.01,.99,.01)#Hspace being considered
+zspc = c(0,1) #state space being considered
+
+# Wide prior width and mean
+wphi = 2
+wmu = .5
+wide_pH0 = dbeta(hspc,wmu*wphi,(1-wmu)*wphi)
+wide_pH0 = wide_pH0/sum(wide_pH0)
+
+# Plot wide prior
+wide_prH0_plot = ggplot()+
+  geom_line(aes(hspc,wide_pH0),color='black',size=1)+
+  ylab('Pr(H)')+
+  xlab('Hazard')+
+  ggtitle('Wide Prior')+
+    theme(
+      legend.position = 'none',
+      axis.text.x = element_text(size=12,color='black'),
+      axis.text.y = element_blank(),
+      axis.ticks.y=element_blank(),
+      axis.title = element_text(size=16,color='black'),
+      plot.title = element_text(hjust=.5,size=18,face='italic'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+wide_prH0_plot
+ggsave('./Fig3S1a_wide_prH0.pdf',plot = wide_prH0_plot,height = 3,width = 5)
+
+# Wide prior behavior
+pdat_3000 = pdat[1:3000,]
+pdat_3000$P_Wide_Resp = as.numeric(ifelse(pdat_3000$P_Wide_Belief==.5,sample(x = c(0,1),1),as.numeric(pdat_3000$P_Wide_Belief>.5)))
+pdat_3000$Wide_Correct = as.numeric(pdat_3000$P_Wide_Resp == pdat_3000$Source)
+pdat_3000.m = ddply(subset(pdat_3000,!is.na(TSCP2)),.(Hazard,TSCP2),summarize,Pcor = mean(Wide_Correct),mse = mean_se(Wide_Correct)[[2]],pse=mean_se(Wide_Correct)[[3]])
+pdat_3000.m$Hazard = factor(pdat_3000.m$Hazard)
+
+wide_sim_plt = ggplot(pdat_3000.m,aes(TSCP2,Pcor,ymin=mse,ymax=pse,color=Hazard,group=Hazard))+
+  geom_errorbar(width=.1)+
+  geom_point(size=3)+
+  geom_line(linetype=2)+
+  ylim(c(0,1))+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab('Trial Since Source Switch' )+
+  xlab('Proportion Correct\nResponses')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=14,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+wide_sim_plt
+ggsave('./Fig3S1a_wide_sim.pdf',plot = wide_sim_plt,height = 3,width = 5)
+```
+# Simulated behavior from narrow prior model
+```{r}
+# Support for hazard rate and states
+hspc = seq(.01,.99,.01) #Hspace being considered
+zspc = c(0,1) #state space being considered
+
+# Wide prior width and mean
+nphi = exp(7)
+nmu = .3
+narrow_pH0 = dbeta(hspc,nmu*nphi,(1-nmu)*nphi)
+narrow_pH0 = narrow_pH0/sum(narrow_pH0)
+
+# Plot wide prior
+narrow_prH0_plot = ggplot()+
+  geom_line(aes(hspc,narrow_pH0),color='black',size=1)+
+  ylab('Pr(H)')+
+  xlab('Hazard')+
+  ggtitle('Narrow Prior')+
+    theme(
+      legend.position = 'none',
+      axis.text.x = element_text(size=12,color='black'),
+      axis.text.y = element_blank(),
+      axis.ticks.y=element_blank(),
+      axis.title = element_text(size=16,color='black'),
+      plot.title = element_text(hjust=.5,size=18,face='italic'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+narrow_prH0_plot
+ggsave('./Fig3S1a_narrow_prH0.pdf',plot = narrow_prH0_plot,height = 3,width = 5)
+
+# Wide prior behavior
+pdat_3000 = pdat[1:3000,]
+pdat_3000$P_Narrow_Resp = as.numeric(ifelse(pdat_3000$P_Narrow_Belief==.5,sample(x = c(0,1),1),as.numeric(pdat_3000$P_Narrow_Belief>.5)))
+pdat_3000$Narrow_Correct = as.numeric(pdat_3000$P_Narrow_Resp == pdat_3000$Source)
+pdat_3000.m = ddply(subset(pdat_3000,!is.na(TSCP2)),.(Hazard,TSCP2),summarize,Pcor = mean(Narrow_Correct),mse = mean_se(Narrow_Correct)[[2]],pse=mean_se(Narrow_Correct)[[3]])
+pdat_3000.m$Hazard = factor(pdat_3000.m$Hazard)
+
+narrow_sim_plt = ggplot(pdat_3000.m,aes(TSCP2,Pcor,ymin=mse,ymax=pse,color=Hazard,group=Hazard))+
+  geom_errorbar(width=.1)+
+  geom_point(size=3)+
+  geom_line(linetype=2)+
+  ylim(c(0,1))+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab('Trial Since Source Switch' )+
+  xlab('Proportion Correct\nResponses')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=14,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+narrow_sim_plt
+ggsave('./Fig3S1a_narrow_sim.pdf',plot = narrow_sim_plt,height = 3,width = 5)
+```
+
+
+```{r}
+#Simulation with average subject parameters
+bp = read.csv('../data/BayesParams.csv',sep=',')
+hspc = seq(.01,.99,.01)#c(.05,.95) #Hspace being considered
+zspc = c(0,1) #state space being considered
+phi = exp(mean(bp$BM2_log_Precision))
+mu = mean(bp$BM2_Mean)
+k = exp(mean(bp$BM2_log_K))
+pH0 = dbeta(hspc,mu*phi,(1-mu)*phi)
+pH0 = pH0/sum(pH0)
+
+# Plot average subject prior
+prH0 = ggplot()+
+  geom_line(aes(hspc,pH0),color='black',size=1)+
+  ylab('Pr(H)')+
+  xlab('Hazard Rate')+
+  ggtitle('Average Subject Prior')+
+    theme(
+      legend.position = 'none',
+      axis.text.x = element_text(size=12,color='black'),
+      axis.text.y = element_blank(),
+      axis.ticks.y=element_blank(),
+      axis.title = element_text(size=16,color='black'),
+      plot.title = element_text(hjust=.5,size=18,face='italic'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+prH0
+ggsave('./Fig3S1b_avg_prH0.pdf',plot = prH0,height = 3,width = 4)
+```
+
+Trial by trial examples of belief and surprise
+```{r}
+# Generate simulations using average subject prior
+#Trials
+x = bdat$X[1:3000]-1 #turn to 0s and 1s
+h = bdat$H[1:3000]
+z = bdat$Z[1:3000]
+p=.8 #emission probability for simulations
+
+#Initializing prior and posterior
+priorZH = array(rep(NA,length(hspc)*length(zspc)*length(x)),dim=c(length(zspc),length(hspc),length(x)))
+postZH = array(rep(NA,length(hspc)*length(zspc)*length(x)),dim=c(length(zspc),length(hspc),length(x)))
+
+#Likelihoods
+lz12 = matrix(rep(NA,length(x)*2),nrow=2) #likelihoods
+lz12[1,] = ifelse(x==0,p,1-p)
+lz12[2,] = ifelse(x==1,p,1-p)
+
+#Model marginals - estimates of the state and the hazard rate on each trial
+z_hat = c()
+h_hat = c()
+
+#Loop through observations
+for(i in 1:length(x)){
+    #First, get the prior for the current trial
+    if(i == 1){
+      #Account for the model's prior on first trial
+      priorZH[,,i] = rep(1/(length(zspc)*length(hspc)),length(zspc)*length(hspc))
+      for(iz in 1:length(zspc)){
+        priorH = priorZH[iz,,i]
+        for(ih in 1:length(hspc)){
+         priorZH[iz,ih,i] = pH0[ih]
+        }
+      }
+    }
+  else{
+    # Adjust posterior from previous trial by accounting for subjective hazard rate
+    for(ih in 1:length(hspc)){
+      H = hspc[ih]
+      postZ = postZH[,ih,i-1]
+      z1 = ((1-H)*postZ[1]+H*postZ[2])
+      z2 = ((1-H)*postZ[2]+H*postZ[1])
+      priorZH[,ih,i] = c(z1,z2)
+    }
+    for(iz in 1:length(zspc)){
+      priorH = priorZH[iz,,i]
+      for(ih in 1:length(hspc)){
+        priorZH[iz,ih,i] = (1-k)*priorH[ih]+k*pH0[ih]
+      }
+    }
+    priorZH[,,i] = priorZH[,,i]/sum(priorZH[,,i])
+  }
+  
+  # Get marginals for prior estimate of state (z - marginalize over h) and hazard rate (h - marginalize over z)
+  z_hat[i] = sum(rowSums(priorZH[,,i])*zspc)
+  h_hat[i] = sum(colSums(priorZH[,,i])*hspc)
+  #Next posterior
+  for(ih in 1:length(hspc)){
+    for(iz in 1:length(zspc)){
+      postZH[iz,ih,i] = priorZH[iz,ih,i]*lz12[iz,i]
+    }
+  }
+  #Normalize
+  postZH[,,i] = postZH[,,i]/sum(postZH[,,i])
+}
+
+# Use these simulations to get subset of surprise and belief strength values
+int = 1900:2300
+
+# Convert prior to log prior odds to get belief strength
+lz =log(z_hat)-log(1-z_hat)
+# Get surprisal
+sup = ifelse(x==1,-log(z_hat),-log(1-z_hat))
+
+#Data frame for plotting
+sim_bel = data.frame(Trial = 1:3000,lz = lz,lz_ab=abs(lz),sup=sup)
+#Set colors
+hues = seq(15, 375, length = 2 + 1)
+cols = hcl(h = hues, l = 65, c = 100)[1:2]
+
+# Plot average prior belief strength
+bel_avg_plt = ggplot(subset(sim_bel,Trial %in% int),aes(Trial,lz_ab))+
+  geom_line(color=cols[2])+
+  ylab('Absolute Belief Strength')+
+    theme(
+      legend.position = 'none',
+      axis.text.x = element_text(size=12,color='black'),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.title = element_text(size=16,color='black'),
+      plot.title = element_text(hjust=.5,size=18,face='italic'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+bel_avg_plt
+ggsave('./Fig3S1b_bel_avg_plt.pdf',plot = bel_avg_plt,height = 3,width = 8)
+
+#Plot average surprise
+sup_avg_plt = ggplot(subset(sim_bel,Trial %in% int),aes(Trial,sup))+
+  geom_line(color=cols[1])+
+  ylab('Surprise')+
+    theme(
+      legend.position = 'none',
+      axis.text.x = element_text(size=12,color='black'),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.title = element_text(size=16,color='black'),
+      plot.title = element_text(hjust=.5,size=18,face='italic'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+sup_avg_plt
+ggsave('./Fig3S1b_sup_avg_plt.pdf',plot = sup_avg_plt,height = 3,width = 8)
+
+# Plot example trial structure
+pdat_ex = pdat[1900:2300,.(Hazard,Stim,Source)]
+pdat_ex$Trial = 1900:2300
+pdat_ex.long=gather(pdat_ex,Type,Value,Hazard:Source)
+ex_trials = ggplot(pdat_ex.long,aes(Trial,Value))+
+  geom_line()+
+  facet_wrap(~Type,nrow=3)+
+    theme(
+      legend.position = 'none',
+      axis.text.x = element_text(size=12,color='black'),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.title = element_text(size=16,color='black'),
+      plot.title = element_text(hjust=.5,size=18,face='italic'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      strip.background = element_blank(),
+      strip.text = element_blank(),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+ex_trials
+ggsave('./Fig3S1b_ex_trials.pdf',plot = ex_trials,height = 3,width = 8)
+```
+

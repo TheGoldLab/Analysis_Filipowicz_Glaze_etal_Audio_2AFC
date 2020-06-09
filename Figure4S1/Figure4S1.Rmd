@@ -1,0 +1,31 @@
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load adaptivity model fits
+adaptH = fread('../data/adaptH_params.csv',sep=',')
+
+# Plot correlation between adaptivity and choice variability from choice variability model (Model 2 - M2)
+bv_plt = ggplot(adaptH,aes(M2_Hm,M2_CV))+
+  geom_smooth(method='lm',se=F,color='black')+
+  geom_point(size=4,color='black',alpha=.1)+
+  geom_point(size=4,color='black',shape=1,stroke=.75)+
+  ylab('Choice Variability')+
+  xlab('Adaptivity')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+ggsave('./Fig4S1_biasvariance.pdf',bv_plt,height=4,width=5)
+```

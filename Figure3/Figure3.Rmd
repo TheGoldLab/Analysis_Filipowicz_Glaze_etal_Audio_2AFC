@@ -1,0 +1,464 @@
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load trial by trial pupil data
+pdat = fread('../data/pdat.csv',sep=',')
+
+#Load response time data - there was an discrepancy with the originally calculated RTs (this corrects that)
+fpath = '/Users/alsfilip/Dropbox/Penn/Auditory_2AFC/Auditory_2AFC/Merged_Data/All_Merged_CSV/'
+rtfiles = dir(fpath,pattern='.csv')
+print(rtfiles)
+rtdat = read.csv(paste0(fpath,rtfiles[1]),sep=',',stringsAsFactors = F)
+for(i in 2:length(rtfiles)){
+  rd = read.csv(paste0(fpath,rtfiles[i]),sep=',',stringsAsFactors = F)
+  rtdat = rbind(rtdat,rd)
+}
+
+for(sub in unique(pdat$Subject)){
+  for(sess in unique(pdat$Session)){
+    sdat = pdat[Subject == sub & Session == sess]
+    rtd = subset(rtdat,Subject == sub & Session ==sess)
+    pdat[Subject == sub & Session == sess,("logRT2") := log(rtd$RT)]
+    pdat[Subject == sub & Session == sess,("NextlogRT2") := c(log(rtd$RT[2:1000]),NA)]
+  }
+}
+```
+
+Influence of belief strength and surprise on baseline pupil
+```{r}
+getSupBelLME = function(dat,h,rt=F){
+  dat2 = dat[Hazard == h]
+  dat2[,("Baseline") := scale(dat2$Baseline)]
+  dat2[,("Change_1") := scale(dat2$Change_1)]
+  dat2[,("Surprise") := scale(dat2$Surprise)]
+  dat2[,("L_Bayes_Prior_Ab") := scale(dat2$L_Bayes_Prior_Ab)]
+  dat2[,("logRT2") := scale(dat2$logRT2)]
+  
+  if(rt){
+    dat_lme = lmer(Baseline~L_Bayes_Prior_Ab+Surprise+Change_1+logRT2+
+                     (1+L_Bayes_Prior_Ab|Subject)+(1+Surprise|Subject)+(1+Change_1|Subject)+(1+logRT2|Subject),
+                   dat2,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  }
+  else{
+    dat_lme = lmer(Baseline~L_Bayes_Prior_Ab+Surprise+Change_1+
+                     (1+L_Bayes_Prior_Ab|Subject)+(1+Surprise|Subject)+(1+Change_1|Subject),
+                   dat2,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  }
+  
+  dat_df = coef(dat_lme)$Subject
+  dat_df$Subject = row.names(dat_df)
+  dat_df$Hazard = h
+  return(list(DF=dat_df,SUMM=summary(dat_lme)))
+}
+pdat_base = pdat[,c(Subject,Hazard,Baseline,Change_1,Surprise,L_Bayes_Prior_Ab,logRT2)]
+
+# Without accounting for RT
+pdat_base_lme_h1 = getSupBelLME(pdat,.01)
+pdat_base_lme_h3 = getSupBelLME(pdat,.3)
+pdat_base_lme_h9 = getSupBelLME(pdat,.99)
+
+#Merge
+base_sup_bel_h = rbind(pdat_base_lme_h1$DF,pdat_base_lme_h3$DF,pdat_base_lme_h9$DF)
+base_sup_bel_h$Hazard = factor(base_sup_bel_h$Hazard,labels=c('H = 0.01','H = 0.3','H = 0.99'))
+base_sup_bel_h.long = gather(base_sup_bel_h,Variable,Beta,L_Bayes_Prior_Ab:Surprise)
+base_sup_bel_h.long$Variable = factor(base_sup_bel_h.long$Variable,labels=c('Belief Strength','Surprise'))
+
+base_sup_bel_plt = ggplot(base_sup_bel_h.long,aes(Variable,Beta,color=Hazard,fill=Hazard,alpha=Variable))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_boxplot()+
+  scale_alpha_manual(values=c(.7,0))+
+  facet_wrap(~Hazard)+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab("Beta Weights")+
+  ggtitle('Baseline')+
+    theme(
+      legend.position = 'none',
+      plot.title = element_text(size=18,face='bold',hjust=.5),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.text.x = element_text(size=12,color='black',angle=315,vjust=0.5,hjust=0),
+      axis.title.y = element_text(size=14,color='black'),
+      axis.title.x = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+base_sup_bel_plt
+ggsave('./F3a_baseline.pdf',plot=base_sup_bel_plt,width = 5,height=5)
+
+# With accounting for RT - save images in Figure3S3 folder
+pdat_base_lme_h1_rt = getSupBelLME(pdat,.01,rt=T)
+pdat_base_lme_h3_rt = getSupBelLME(pdat,.3,rt=T)
+pdat_base_lme_h9_rt = getSupBelLME(pdat,.99,rt=T)
+
+base_sup_bel_h_rt = rbind(pdat_base_lme_h1_rt$DF,pdat_base_lme_h3_rt$DF,pdat_base_lme_h9_rt$DF)
+base_sup_bel_h_rt$Hazard = factor(base_sup_bel_h_rt$Hazard,labels=c('H = 0.01','H = 0.3','H = 0.99'))
+base_sup_bel_h_rt.long = gather(base_sup_bel_h_rt,Variable,Beta,L_Bayes_Prior_Ab:Surprise)
+base_sup_bel_h_rt.long$Variable = factor(base_sup_bel_h_rt.long$Variable,labels=c('Belief Strength','Surprise'))
+
+base_sup_bel_rt_plt = ggplot(base_sup_bel_h_rt.long,aes(Variable,Beta,color=Hazard,fill=Hazard,alpha=Variable))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_boxplot()+
+  scale_alpha_manual(values=c(.7,0))+
+  facet_wrap(~Hazard)+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab("Beta Weights")+
+  ggtitle('Baseline (accounting for RT)')+
+    theme(
+      legend.position = 'none',
+      plot.title = element_text(size=18,face='bold',hjust=.5),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.text.x = element_text(size=12,color='black',angle=315,vjust=0.5,hjust=0),
+      axis.title.y = element_text(size=14,color='black'),
+      axis.title.x = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+base_sup_bel_rt_plt
+ggsave('../Figure3S3/F3S3a_baseline.pdf',plot=base_sup_bel_rt_plt,width = 5,height=5)
+```
+
+Influence of computational variables on evoked changes in pupil after tone onset
+```{r}
+# Get required columns from pupil file
+pdat_ec = pdat[,c(2,4,140,143,145,198,203,205,20:139)]
+pdat_ec[,("Hazard"):= factor(pdat_ec$Hazard,labels=c("H = .01","H = .3","H = .99"))]
+pdat_ec = data.frame(pdat_ec)
+
+#Function to compute beta for each sample point after stimulus onset
+getPupBeta = function(d,x,h,rt = F){
+  
+  # Get requested sample from tone onset to test
+  dat = d[,c(1:8,x+8)]
+  names(dat)[9] = 'Pupil'
+  
+  # Get difference from baseline
+  dat$PupilDiff = dat$Pupil-dat$Baseline
+  
+  # Scale variables
+  dat$L_Bayes_Prior_Ab = scale(dat$L_Bayes_Prior_Ab)
+  dat$Surprise=scale(dat$Surprise)
+  dat$PupilDiff= scale(dat$PupilDiff)
+  dat$Baseline= scale(dat$Baseline)
+  dat$Baseline_1=scale(dat$Baseline_1)
+  dat$Change_1=scale(dat$Change_1)
+  
+  # If RT is not to be accounted for
+  if(rt = F){
+    dat_ec_lme = lmer(PupilDiff~L_Bayes_Prior_Ab+Surprise+Baseline+Baseline_1+Change_1+
+                     (1|Subject)+(1+L_Bayes_Prior_Ab|Subject)+(1+Surprise|Subject)+(1+Baseline|Subject)+(1+Baseline_1|Subject)+(1+Change_1|Subject),dat,
+                    REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  }
+  
+  # If RT should be considered
+  else{
+    dat_ec_lme = lmer(PupilDiff~L_Bayes_Prior_Ab+Surprise+NextlogRT2+Baseline+Baseline_1+Change_1+
+                     (1|Subject)+(1+L_Bayes_Prior_Ab|Subject)+(1+Surprise|Subject)+(1+NextlogRT2|Subject)+(1+Baseline|Subject)+(1+Baseline_1|Subject)+(1+Change_1|Subject),dat,
+                    REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))    
+  }
+  
+  # SAve summary and data frame with beta weights
+  df = coef(dat_ec_lme)
+  return(list(DF=df$Subject,SUMM=summary(dat_ec_lme)))
+}
+
+# Everything with RT accounts for RT effects - used for Fig 3 and 3S3 - takes about 4 hours to run on a quadcore macbook pro
+library(parallel)
+cl = makeCluster(8)
+clusterExport(cl = cl,varlist = c('getPupBeta','pdat_ec','lmer','lmerControl','coef','scale'))
+h1_ec_bel = parLapply(cl,1:120,function(x) getPupBeta(pdat_ec[pdat_ec$Hazard == 'H = .01',],x,'H = .01',rt = F))
+saveRDS(object = h1_ec_bel,"./h1_ec_bel.rds")
+h1_ec_bel_rt = parLapply(cl,1:120,function(x) getPupBeta(pdat_ec[pdat_ec$Hazard == 'H = .01',],x,'H = .01',rt = T))
+saveRDS(object = h1_ec_bel_rt,"./h1_ec_bel_rt.rds")
+
+h3_ec_bel = parLapply(cl,1:120,function(x) getPupBeta(pdat_ec[pdat_ec$Hazard == 'H = .3',],x,'H = .3',rt = F))
+saveRDS(object = h3_ec_bel,"./h3_ec_bel.rds")
+h3_ec_bel_rt = parLapply(cl,1:120,function(x) getPupBeta(pdat_ec[pdat_ec$Hazard == 'H = .3',],x,'H = .3',rt = T))
+saveRDS(object = h3_ec_bel_rt,"./h3_ec_bel_rt.rds")
+
+h9_ec_bel_rt = parLapply(cl,1:120,function(x) getPupBeta(pdat_ec[pdat_ec$Hazard == 'H = .99',],x,'H = .99',rt = F))
+saveRDS(object = h9_ec_bel_rt,"./h9_ec_bel.rds")
+h9_ec_bel = parLapply(cl,1:120,function(x) getPupBeta(pdat_ec[pdat_ec$Hazard == 'H = .99',],x,'H = .99',rt = T))
+saveRDS(object = h9_ec_bel,"./h9_ec_bel_rt.rds")
+stopCluster(cl)
+```
+
+Get p-values for 10 time points
+```{r}
+# Get necessary columns, like above
+pdat_ec = pdat[,c(2,4,140,143,145,198,203,205,20:139)]
+pdat_ec[,("Hazard"):= factor(pdat_ec$Hazard,labels=c("H = .01","H = .3","H = .99"))]
+pdat_ec = data.frame(pdat_ec)
+
+#Separate 120 samples into 10 different time points
+intervals = seq(9,128,120/10)
+library(parallel)
+cl = makeCluster(8)
+clusterExport(cl = cl,varlist = c('pdat_ec','lapply','intervals'))
+pdat_ec$T1 = parSapply(cl,1:length(pdat_ec$Sample10), function(x) mean(as.numeric(pdat_ec[x,intervals[1]:intervals[1]+11])-pdat_ec$Baseline[x],na.rm=T))
+pdat_ec$T2 = parSapply(cl,1:length(pdat_ec$Sample10), function(x) mean(as.numeric(pdat_ec[x,intervals[2]:intervals[2]+11])-pdat_ec$Baseline[x],na.rm=T))
+pdat_ec$T3 = parSapply(cl,1:length(pdat_ec$Sample10), function(x) mean(as.numeric(pdat_ec[x,intervals[3]:intervals[3]+11])-pdat_ec$Baseline[x],na.rm=T))
+pdat_ec$T4 = parSapply(cl,1:length(pdat_ec$Sample10), function(x) mean(as.numeric(pdat_ec[x,intervals[4]:intervals[4]+11])-pdat_ec$Baseline[x],na.rm=T))
+pdat_ec$T5 = parSapply(cl,1:length(pdat_ec$Sample10), function(x) mean(as.numeric(pdat_ec[x,intervals[5]:intervals[5]+11])-pdat_ec$Baseline[x],na.rm=T))
+pdat_ec$T6 = parSapply(cl,1:length(pdat_ec$Sample10), function(x) mean(as.numeric(pdat_ec[x,intervals[6]:intervals[6]+11])-pdat_ec$Baseline[x],na.rm=T))
+pdat_ec$T7 = parSapply(cl,1:length(pdat_ec$Sample10), function(x) mean(as.numeric(pdat_ec[x,intervals[7]:intervals[7]+11])-pdat_ec$Baseline[x],na.rm=T))
+pdat_ec$T8 = parSapply(cl,1:length(pdat_ec$Sample10), function(x) mean(as.numeric(pdat_ec[x,intervals[8]:intervals[8]+11])-pdat_ec$Baseline[x],na.rm=T))
+pdat_ec$T9 = parSapply(cl,1:length(pdat_ec$Sample10), function(x) mean(as.numeric(pdat_ec[x,intervals[9]:intervals[9]+11])-pdat_ec$Baseline[x],na.rm=T))
+pdat_ec$T10 = parSapply(cl,1:length(pdat_ec$Sample10), function(x) mean(as.numeric(pdat_ec[x,intervals[10]:intervals[10]+11])-pdat_ec$Baseline[x],na.rm=T))
+stopCluster(cl)
+
+
+pdat_ec_ts = pdat_ec[,c(1:8,129:138)]
+# Test significance
+getSig = function(dat,x,rt = F){
+  d = dat[,c(1:8,8+x)]
+  names(d)[9] = 'Pupil'
+  d$PupilDiff = d$Pupil-d$Baseline
+  d$Baseline = scale(d$Baseline)
+  d$Baseline_1 = scale(d$Baseline_1)
+  d$Change = scale(d$Change)
+  d$Change_1 = scale(d$Change_1)
+  d$L_Bayes_Prior_Ab = scale(d$L_Bayes_Prior_Ab)
+  d$Surprise = scale(d$Surprise)
+  d$NextlogRT2 = scale(d$NextlogRT2)
+  #If you want to account for RT
+  if(rt){
+    dat_lme = lmer(PupilDiff~L_Bayes_Prior_Ab+Surprise+NextlogRT2+Baseline+Baseline_1+Change_1+
+                     (1|Subject)+(1+L_Bayes_Prior_Ab|Subject)+(1+Surprise|Subject)+(1+NextlogRT2|Subject)+(1+Baseline|Subject)+(1+Baseline_1|Subject)+(1+Change_1|Subject),
+                   d,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  }
+  else{
+    dat_lme = lmer(PupilDiff~L_Bayes_Prior_Ab+Surprise+Baseline+Baseline_1+Change_1+
+                     (1|Subject)+(1+L_Bayes_Prior_Ab|Subject)+(1+Surprise|Subject)+(1+Baseline|Subject)+(1+Baseline_1|Subject)+(1+Change_1|Subject),
+                   d,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  }
+  return(summary(dat_lme))
+}
+
+library(parallel)
+cl = makeCluster(8)
+clusterExport(cl = cl,varlist = c('pdat_ec_ts','lmer','scale','getSig','lmerControl'))
+h1_sums = parLapply(cl,1:10,function(x) getSig(pdat_ec_ts[pdat_ec_ts$Hazard == 'H = .01',],x,rt = T))
+saveRDS(object = h1_sums,"./h1_ec_sums_rt.rds")
+h3_sums = parLapply(cl,1:10,function(x) getSig(pdat_ec_ts[pdat_ec_ts$Hazard == 'H = .3',],x,rt = T))
+saveRDS(object = h3_sums,"./h3_ec_sums_rt.rds")
+h9_sums = parLapply(cl,1:10,function(x) getSig(pdat_ec_ts[pdat_ec_ts$Hazard == 'H = .99',],x,rt = T))
+saveRDS(object = h9_sums,"./h9_ec_sums_rt.rds")
+stopCluster(cl)
+```
+
+Plot evoked change for samples from baseline without and with in the model
+```{r}
+# Load previously computed beta weights and p-values
+h1_ec_bel = readRDS("./h1_ec_bel_rt.rds")
+h3_ec_bel = readRDS("./h3_ec_bel_rt.rds")
+h9_ec_bel = readRDS("./h9_ec_bel_rt.rds")
+
+h1_ec_summ = readRDS("./h1_ec_sums_rt.rds")
+h3_ec_summ = readRDS("./h3_ec_sums_rt.rds")
+h9_ec_summ = readRDS("./h9_ec_sums_rt.rds")
+
+# Functions to extract beta weights and p-values
+procPupBeta = function(ec_bel,ec_summ,h){
+  numSamps = 1:length(ec_bel)
+  ecdf = data.frame(Subject=c(),Sample=c(),Bel_Strength=c(),Surprise=c())
+  ps = data.frame(Sample=c(),Bel_Strength=c(),Surprise=c())
+  sup_ps = c()
+  pInd = 1
+  for(i in numSamps){
+    df = ec_bel[[i]]$DF
+    ecdf_prime = data.frame(Subject=row.names(df),
+                            Sample=rep(i,length(row.names(df))),
+                            Bel_Strength=df$L_Bayes_Prior_Ab,
+                            Surprise=df$Surprise)
+    summ = ec_summ[[pInd]]
+    summ_prime = data.frame(Sample=i,
+                            Bel_Strength = summ$coefficients[2,5],
+                            Surprise = summ$coefficients[3,5])
+    
+    ecdf = rbind(ecdf,ecdf_prime)
+    ps = rbind(ps,summ_prime)
+    if(i%%12 == 0){
+      pInd = pInd +1
+    }
+  }
+  
+  ecdf$Hazard = h
+  ps$Hazard = h
+  return(list(Betas = ecdf,Ps = ps))
+}
+
+# Get beta weights and p-values for each hazard rate
+h1_betas_ps = procPupBeta(h1_ec_bel,h1_ec_summ,'H = .01')
+h3_betas_ps = procPupBeta(h3_ec_bel,h3_ec_summ,'H = .3')
+h9_betas_ps = procPupBeta(h9_ec_bel,h9_ec_summ,'H = .99')
+
+# Merge and use for plotting
+h_betas = rbind(h1_betas_ps$Betas,h3_betas_ps$Betas,h9_betas_ps$Betas)
+h_betas.long = gather(h_betas,Type,Betas,Bel_Strength:Surprise)
+
+h_ps = rbind(h1_betas_ps$Ps,h3_betas_ps$Ps,h9_betas_ps$Ps)
+h_ps.long = gather(h_ps,Type,Ps,Bel_Strength:Surprise)
+
+h_betas_long.m = ddply(h_betas.long,.(Hazard,Sample,Type),summarize,
+                       MB = mean(Betas),mse = mean_se(Betas)[[2]],pse = mean_se(Betas)[[3]])
+h_betas_all = merge(h_betas_long.m,h_ps.long)
+h_betas_all$Sig = as.numeric(h_betas_all$Ps<(.05/10))
+h_betas_all$Sig[h_betas_all$Type == 'Bel_Strength'] = h_betas_all$Sig[h_betas_all$Type == 'Bel_Strength']*-.05
+h_betas_all$Sig[h_betas_all$Type == 'Surprise'] = h_betas_all$Sig[h_betas_all$Type == 'Surprise']*.12
+h_betas_all$Sig[h_betas_all$Sig == 0] = NA
+
+ec_bel_h_rt_plt = ggplot(h_betas_all,aes(Sample,MB,ymin=mse,ymax=pse,fill=Hazard))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_ribbon(aes(color=Hazard,alpha=Type))+
+  geom_line(aes(color=Hazard,linetype=Type),size=1)+
+  geom_line(aes(Sample,Sig,linetype=Type,color=Hazard),size=1)+
+  facet_wrap(~Hazard)+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_alpha_manual(values=c(.4,.1))+
+  scale_x_continuous(breaks=c(1,60,120),labels=c(0,1,2))+
+  xlab('Time from Stimulus Onset (sec)')+
+  ylab('Beta')+
+  ylim(c(-.06,.13))+
+    theme(
+      legend.position = 'none',
+      axis.text.x = element_text(size=12,color='black'),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,face='bold'),
+      plot.title = element_text(hjust=.5,size=18,face='italic'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+ec_bel_h_rt_plt
+ggsave('../Figure3S3/F3S3b_evokedchange.pdf',plot = ec_bel_h_rt_plt,height = 5.2,width = 10)
+```
+
+Calculations for logRT and Next logRT
+```{r}
+getSupBelRTLME = function(dat,h,nrt=F){
+  dat2 = dat[Hazard == h]
+  dat2[,("Baseline") := scale(dat2$Baseline)]
+  dat2[,("Surprise") := scale(dat2$Surprise)]
+  dat2[,("L_Bayes_Prior_Ab") := scale(dat2$L_Bayes_Prior_Ab)]
+  dat2[,("logRT2") := scale(dat2$logRT2)]
+  dat2[,("NextlogRT2") := scale(dat2$NextlogRT2)]
+  
+  # If you want next logRT
+  if(nrt){
+    dat_lme = lmer(NextlogRT2~L_Bayes_Prior_Ab+Surprise+
+                     (1+L_Bayes_Prior_Ab|Subject)+(1+Surprise|Subject),
+                   dat2,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  }
+  else{
+    dat_lme = lmer(logRT2~L_Bayes_Prior_Ab+Surprise+
+                     (1+L_Bayes_Prior_Ab|Subject)+(1+Surprise|Subject),
+                   dat2,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  }
+  
+  dat_df = coef(dat_lme)$Subject
+  dat_df$Subject = row.names(dat_df)
+  dat_df$Hazard = h
+  return(list(DF=dat_df,SUMM=summary(dat_lme)))
+}
+pdat_rt = pdat[,c(Subject,Hazard,Surprise,L_Bayes_Prior_Ab,logRT2,NextlogRT2)]
+
+# Influence of computational variables on RTs
+pdat_rt_lme_h1 = getSupBelRTLME(pdat,.01)
+pdat_rt_lme_h3 = getSupBelRTLME(pdat,.3)
+pdat_rt_lme_h9 = getSupBelRTLME(pdat,.99)
+
+# Influence of computational variables on next RTs
+pdat_nrt_lme_h1 = getSupBelRTLME(pdat,.01,nrt=T)
+pdat_nrt_lme_h3 = getSupBelRTLME(pdat,.3,nrt=T)
+pdat_nrt_lme_h9 = getSupBelRTLME(pdat,.99,nrt=T)
+
+# Plot current RTs
+rt_sup_bel_h = rbind(pdat_rt_lme_h1$DF,pdat_rt_lme_h3$DF,pdat_rt_lme_h9$DF)
+rt_sup_bel_h$Hazard = factor(rt_sup_bel_h$Hazard,labels=c('H = .01','H = .3','H = .99'))
+rt_sup_bel_h.long = gather(rt_sup_bel_h,Variable,Beta,L_Bayes_Prior_Ab:Surprise)
+rt_sup_bel_h.long$Variable = factor(rt_sup_bel_h.long$Variable,labels=c('Belief Strength','Surprise'))
+
+rt_sup_bel_plt = ggplot(rt_sup_bel_h.long,aes(Variable,Beta,color=Hazard,fill=Hazard,alpha=Variable))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_boxplot()+
+  scale_alpha_manual(values=c(.7,0))+
+  facet_wrap(~Hazard)+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab("Beta Weights")+
+  ggtitle('log Response Times')+
+    theme(
+      legend.position = 'none',
+      plot.title = element_text(size=18,face='bold',hjust=.5),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.text.x = element_text(size=12,color='black',angle=315,vjust=0.5,hjust=0),
+      axis.title.y = element_text(size=14,color='black'),
+      axis.title.x = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+rt_sup_bel_plt
+ggsave('./F3c_lrt.pdf',plot=rt_sup_bel_plt,width = 5,height=5)
+
+# Plot next RTs
+nrt_sup_bel_h = rbind(pdat_nrt_lme_h1$DF,pdat_nrt_lme_h3$DF,pdat_nrt_lme_h9$DF)
+nrt_sup_bel_h$Hazard = factor(nrt_sup_bel_h$Hazard,labels=c('H = .01','H = .3','H = .99'))
+nrt_sup_bel_h.long = gather(nrt_sup_bel_h,Variable,Beta,L_Bayes_Prior_Ab:Surprise)
+nrt_sup_bel_h.long$Variable = factor(nrt_sup_bel_h.long$Variable,labels=c('Belief Strength','Surprise'))
+
+nrt_sup_bel_plt = ggplot(nrt_sup_bel_h.long,aes(Variable,Beta,color=Hazard,fill=Hazard,alpha=Variable))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_boxplot()+
+  scale_alpha_manual(values=c(.7,0))+
+  facet_wrap(~Hazard)+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab("Beta Weights")+
+  ggtitle('Next log Response Times')+
+    theme(
+      legend.position = 'none',
+      plot.title = element_text(size=18,face='bold',hjust=.5),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.text.x = element_text(size=12,color='black',angle=315,vjust=0.5,hjust=0),
+      axis.title.y = element_text(size=14,color='black'),
+      axis.title.x = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+nrt_sup_bel_plt
+ggsave('./F3d_nlrt.pdf',plot=nrt_sup_bel_plt,width = 5,height=5)
+```
+

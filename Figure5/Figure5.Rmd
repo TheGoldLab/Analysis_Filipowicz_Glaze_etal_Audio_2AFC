@@ -1,0 +1,161 @@
+Check consistency between complexity and wide prior model
+
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load trial by trial pupil data
+pdat = fread('../data/pdat.csv',sep=',')
+
+# Load complexity values
+cx = fread('../data/Complexity_Correct.csv',sep=',')
+
+# Get wide prior simulations using the sequence of observations each subject observed
+wp_sim = read.csv('../data/wide_prior_sim.csv',sep=',')
+for(sub in unique(pdat$Subject)){
+  for(sess in unique(pdat$Session)){
+    pdat$New_L_Wide[pdat$Subject == sub & pdat$Session == sess] = wp_sim$Wide_Prior_Odds[wp_sim$Session == sess]
+  }
+}
+
+# Convert log prior odds to probabilities
+pdat$New_L_Wide[is.na(pdat$Resp) == 1] = NA
+pdat$New_P_Wide = 1/(1+exp(-pdat$New_L_Wide))
+
+# Get wide absolute belief strength
+pdat$New_L_Wide_Ab = abs(pdat$New_L_Wide)
+
+# Get wide surprise
+pdat$New_Wide_Surprise = ifelse(pdat$Stim == 0,-log(1-pdat$New_P_Wide),-log(pdat$New_P_Wide))
+```
+
+Compute degree to which subject pupils reflect belief dynamics from the wide prior model
+```{r}
+# Scale variables
+pdat.wide = pdat
+pdat.wide$Baseline = scale(pdat.wide$Baseline)
+pdat.wide$Baseline_1 = scale(pdat.wide$Baseline_1)
+pdat.wide$Change = scale(pdat.wide$Change)
+pdat.wide$Change_1 = scale(pdat.wide$Change_1)
+pdat.wide$New_L_Wide_Ab = scale(scale(pdat.wide$New_L_Wide_Ab))
+pdat.wide$New_Wide_Surprise = scale(scale(pdat.wide$New_Wide_Surprise))
+
+# Compute influence of belief strength on baseline pupil
+pdat.base.wide.lme = lmer(Baseline~New_L_Wide_Ab+Change_1+
+                       (1+New_L_Wide_Ab+Change_1|Subject),
+                     pdat.wide,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+
+wide.base.df = data.frame(coef(pdat.base.wide.lme)$Subject)
+wide.base.df$Subject = row.names(wide.base.df)
+wide.base.df = merge(wide.base.df,cx)
+
+cor.test(wide.base.df$Complexity,wide.base.df$New_L_Wide_Ab,method='spearman')
+
+wide.base.plt = ggplot(wide.base.df,aes(Complexity,New_L_Wide_Ab))+
+  geom_hline(yintercept=c(0),linetype=2)+
+  geom_point(size=4,alpha=.1)+
+  geom_point(shape=1,size=4)+
+  geom_smooth(method='lm',se=F,color='black')+
+  scale_shape_manual(values=c(1,16))+
+  scale_linetype_manual(values=c(2,1))+
+  ylab('Influence of Wide Prior Absolute Belief Strength\n on Baseline Pupil (beta weight)')+
+  scale_x_continuous(breaks=c(0,.2,.4))+
+  theme(
+    axis.text = element_text(size=10,color='black'),
+    axis.title = element_text(size=14,color='black'),
+    strip.background = element_blank(),
+    strip.text = element_text(size=14,color='black',face='italic'),
+    plot.title = element_text(size=18,color='black',face='bold',hjust = .5),
+    axis.line.x = element_line(size = .5,color="black"),
+    axis.line.y = element_line(size=.5,color="black"),
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+wide.base.plt
+
+
+# Compute influence of wide surprise on peak evoked change
+pdat.ec.wide.lme = lmer(Change~New_Wide_Surprise+Baseline+Change_1+Baseline_1+
+                       (1+New_Wide_Surprise+Baseline+Change_1+Baseline_1|Subject),
+                     pdat.wide,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+
+wide.ec.df = data.frame(coef(pdat.ec.wide.lme)$Subject)
+wide.ec.df$Subject = row.names(wide.ec.df)
+wide.ec.df = merge(wide.ec.df,cx)
+cor.test(wide.ec.df$Complexity,wide.ec.df$New_Wide_Surprise,method='spearman')
+
+wide.ec.plt = ggplot(wide.ec.df,aes(Complexity,New_Wide_Surprise))+
+  geom_hline(yintercept=c(0),linetype=2)+
+  geom_point(size=4,alpha=.1)+
+  geom_point(shape=1,size=4)+
+  geom_smooth(method='lm',se=F,color='black')+
+  scale_shape_manual(values=c(1,16))+
+  scale_linetype_manual(values=c(2,1))+
+  ylab('Influence of Wide Prior Surprise on\nEvoked Change in Pupil (beta weight)')+
+  scale_x_continuous(breaks=c(0,.2,.4))+
+  theme(
+    axis.text = element_text(size=10,color='black'),
+    axis.title = element_text(size=14,color='black'),
+    strip.background = element_blank(),
+    strip.text = element_text(size=14,color='black',face='italic'),
+    plot.title = element_text(size=18,color='black',face='bold',hjust = .5),
+    axis.line.x = element_line(size = .5,color="black"),
+    axis.line.y = element_line(size=.5,color="black"),
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+library(gridExtra)
+a = grid.arrange(wide.base.plt,wide.ec.plt,nrow=1)
+
+ggsave('./Fig5ab_wide_prior_betas.pdf',plot=a,height=4,width = 10)
+```
+```{r}
+pdat.ec.wide.lme = lmer(Change~New_Wide_Surprise+Baseline+Change_1+Baseline_1+
+                       (1+New_Wide_Surprise+Baseline+Change_1+Baseline_1|Subject),
+                     pdat.wide,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+
+wide.ec.df = data.frame(coef(pdat.ec.wide.lme)$Subject)
+wide.ec.df$Subject = row.names(wide.ec.df)
+wide.ec.df = merge(wide.ec.df,adaptH_all)
+
+cor.test(wide.ec.df$Complexity[wide.ec.df$Variability_Group == "Low Variability"],wide.ec.df$New_Wide_Surprise[wide.ec.df$Variability_Group == "Low Variability"],method='spearman')
+cor.test(wide.ec.df$Complexity[wide.ec.df$Variability_Group == "High Variability"],wide.ec.df$New_Wide_Surprise[wide.ec.df$Variability_Group == "High Variability"],method='spearman')
+cor.test(wide.ec.df$Complexity,wide.ec.df$New_Wide_Surprise,method='spearman')
+
+wide.ec.plt = ggplot(wide.ec.df,aes(Complexity,New_Wide_Surprise))+
+  geom_hline(yintercept=c(0),linetype=2)+
+  geom_point(size=4,alpha=.1)+
+  geom_point(shape=1,size=4)+
+  geom_smooth(method='lm',se=F,color='black')+
+  scale_shape_manual(values=c(1,16))+
+  scale_linetype_manual(values=c(2,1))+
+  ylab('Influence of Wide Prior Surprise on\nEvoked Change in Pupil (beta weight)')+
+  scale_x_continuous(breaks=c(0,.2,.4))+
+  theme(
+    axis.text = element_text(size=10,color='black'),
+    axis.title = element_text(size=14,color='black'),
+    strip.background = element_blank(),
+    strip.text = element_text(size=14,color='black',face='italic'),
+    plot.title = element_text(size=18,color='black',face='bold',hjust = .5),
+    axis.line.x = element_line(size = .5,color="black"),
+    axis.line.y = element_line(size=.5,color="black"),
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+library(gridExtra)
+a = grid.arrange(wide.base.plt,wide.ec.plt,nrow=1)
+
+ggsave('./wide_prior_betas.pdf',plot=a,height=4,width = 10)
+```
+

@@ -1,0 +1,100 @@
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load trial by trial pupil data
+bdat = fread('../data/bdat.csv',sep=',')
+bdat$Hazard = factor(bdat$H,levels=c(.01,.3,.99),labels=c('H = 0.01','H = 0.3','H = 0.99'))
+
+# Load complexity values
+cx = fread('../data/Complexity_Correct.csv',sep=',')
+
+# Load hazard rate fits
+fitsH = fread('../data/fixedH_params.csv',sep=',')
+
+# Remove any fits for hazard rates that were not viewed by the subject (during the fitting these ended up around .5)
+
+# Restructure to make it merge more easily with subject data per hazard rate
+fitsH.long = gather(fitsH,Hazard,Fit,H1:H9)
+fitsH.long$Hazard = factor(fitsH.long$Hazard,levels=c("H1","H3","H9"),labels=c('H = 0.01','H = 0.3','H = 0.99'))
+
+bdat.fitsH = merge(bdat,fitsH.long)
+
+# Get data frame with mean correct responses
+bdat.fitsH.corr.p = ddply(bdat.fitsH,.(Subject,Hazard),summarize,Mcor = mean(Correct,na.rm=T),Mfit = mean(Fit,na.rm=T))
+
+# Remove any fits for hazard rates where subjects did not make responses (for some reason these show up as ~.5)
+bdat.fitsH.corr.p$Mfit[is.na(bdat.fitsH.corr.p$Mcor)] = NA
+# Add complexity
+bdat.fitsH.corr.cx.p = merge(bdat.fitsH.corr.p,cx[,.(Subject,Complexity)])
+```
+Fit H by hazard rate
+```{r}
+cx_fith_plt=ggplot(bdat.fitsH.corr.cx.p,aes(Complexity,Mfit,color=Hazard))+
+  # Mean proportion correct responses predicted by the wide prior for each hazard rate
+  geom_hline(yintercept=c(0.01),linetype=3,color = "#0072B2")+
+  geom_hline(yintercept=c(0.3),linetype=3,color = "#D55E00")+
+  geom_hline(yintercept=c(0.99),linetype=3,color = "#E69F00")+
+  geom_point(size=4,alpha=.1)+
+  geom_point(size=4,stroke=.75,alpha=1,shape=1)+
+  geom_smooth(method='lm',se=F,color='black')+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_shape_manual(values=c(1,16))+
+  scale_linetype_manual(values=c(2,1))+
+  ylim(c(0,1))+
+  ylab('Fit Hazard Rate')+
+  facet_wrap(~Hazard)+
+    theme(
+      legend.position = 'none',
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+cx_fith_plt
+ggsave('./Fig6a_fith_cx.pdf',plot = cx_fith_plt,height = 4,width = 9)
+```
+
+Proportion correct by complexity by hazard rate
+```{r}
+cx_corr_plt=ggplot(bdat.fitsH.corr.cx.p,aes(Complexity,Mcor,color=Hazard))+
+  # Mean proportion correct responses predicted by the wide prior for each hazard rate
+  geom_hline(yintercept=c(0.93),linetype=3,color = "#0072B2")+
+  geom_hline(yintercept=c(0.63),linetype=3,color = "#D55E00")+
+  geom_hline(yintercept=c(0.88),linetype=3,color = "#E69F00")+
+  geom_point(size=4,alpha=.1)+
+  geom_point(size=4,stroke=.75,alpha=1,shape=1)+
+  geom_smooth(method='lm',se=F,color='black')+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_shape_manual(values=c(1,16))+
+  scale_linetype_manual(values=c(2,1))+
+  ylim(c(0,1))+
+  ylab('Proportion Correct Responses')+
+  facet_wrap(~Hazard)+
+    theme(
+      legend.position = 'none',
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+cx_corr_plt
+ggsave('./Fig6b_correct_cx.pdf',plot = cx_corr_plt,height = 4,width = 9)
+```
+

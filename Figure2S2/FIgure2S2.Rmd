@@ -1,0 +1,329 @@
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+# Load trial by trial pupil data
+pdat = fread('../data/pdat.csv',sep=',')
+```
+
+```{r}
+# Compute influence of incorrect responses/stimulus switches and their interaction on baseline pupil diameter for each hazard rate
+getBaseCorrSwlme = function(dat,h){
+  dat2 = data.frame(dat)
+  pdat.base = subset(dat2,Hazard == h)
+  pdat.base$Baseline = scale(pdat.base$Baseline)
+  pdat.base$Change_1 = scale(pdat.base$Change_1)
+  pdat.base$Incorrect = scale(ifelse(pdat.base$Correct == 0,1,0))
+  pdat.base$StimSwitch = scale(pdat.base$StimSwitch)
+
+  base.swcorr.lme = lmer(Baseline~Incorrect*StimSwitch+Change_1+
+                           (1|Subject)+(1+Incorrect*StimSwitch|Subject)+(1+Change_1|Subject),
+                         pdat.base,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  base.coef = data.frame(coef(base.swcorr.lme)$Subject)
+  base.coef$Subject = row.names(base.coef)
+  base.coef$Hazard = h
+  return(list(Summary = summary(base.swcorr.lme), Betas = base.coef))
+}
+h1_base_swcorr_lme = getBaseCorrSwlme(pdat,0.01)
+h3_base_swcorr_lme = getBaseCorrSwlme(pdat,0.3)
+h9_base_swcorr_lme = getBaseCorrSwlme(pdat,0.99)
+
+h_base_swcorr = rbind(h1_base_swcorr_lme$Betas,h3_base_swcorr_lme$Betas,h9_base_swcorr_lme$Betas)
+h_base_swcorr$Hazard = factor(h_base_swcorr$Hazard,levels=c(0.01,.3,.99),labels=c("H = 0.01","H = 0.3", "H = 0.99"))
+h_base_swcorr$Incorrect.StimSwitch = -1*h_base_swcorr$Incorrect.StimSwitch
+h_base_swcorr.long = gather(h_base_swcorr,Type,Beta,Incorrect:Incorrect.StimSwitch)
+h_base_swcorr.long$Type = factor(h_base_swcorr.long$Type,levels=c("StimSwitch","Incorrect","Incorrect.StimSwitch"),labels=c('Tone Switch','Incorrect','Incorrect x\nTone Switch'))
+
+base_plt = ggplot(subset(h_base_swcorr.long,is.na(Type)==0),aes(Type,Beta,color=Hazard,fill=Hazard,alpha=Type))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_boxplot()+
+  scale_alpha_manual(values=c(0,.3,.7))+
+  facet_wrap(~Hazard)+
+  ylab('Baseline Beta')+
+  ggtitle('Baseline Before Tone')+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylim(c(-.25,.25))+
+    theme(
+      legend.position = 'none',
+      plot.title = element_text(size=18,face='bold',hjust=.5),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.text.x = element_text(size=12,color='black',angle=315,vjust=0.5,hjust=0),
+      axis.title.y = element_text(size=14,color='black'),
+      axis.title.x = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+base_plt
+ggsave('./F2S2a_baseline.pdf',plot=base_plt,width = 5,height=5)
+```
+```{r}
+# Compute influence of incorrect responses/stimulus switches and their interaction on next baseline pupil diameter for each hazard rate
+getBase1CorrSwlme = function(dat,h){
+  dat2 = data.frame(dat)
+  pdat.base1 = subset(dat2,Hazard == h)
+  pdat.base1$Baseline_plus_1 = scale(pdat.base1$Baseline_plus_1)
+  pdat.base1$Change = scale(pdat.base1$Change)
+  pdat.base1$Incorrect = scale(ifelse(pdat.base1$Correct == 1,0,1))
+  pdat.base1$StimSwitch = scale(pdat.base1$StimSwitch)
+
+  base1.swcorr.lme = lmer(Baseline_plus_1~Incorrect*StimSwitch+Change+
+                           (1|Subject)+(1+Incorrect*StimSwitch|Subject)+(1+Change|Subject),
+                         pdat.base1,REML=F,control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  base1.coef = data.frame(coef(base1.swcorr.lme)$Subject)
+  base1.coef$Subject = row.names(base1.coef)
+  base1.coef$Hazard = h
+  return(list(Summary = summary(base1.swcorr.lme),Betas = base1.coef))
+}
+h1_base1_swcorr_lme = getBase1CorrSwlme(pdat,0.01)
+h3_base1_swcorr_lme = getBase1CorrSwlme(pdat,0.3)
+h9_base1_swcorr_lme = getBase1CorrSwlme(pdat,0.99)
+
+h_base1_swcorr = rbind(h1_base1_swcorr_lme$Betas,h3_base1_swcorr_lme$Betas,h9_base1_swcorr_lme$Betas)
+h_base1_swcorr$Hazard = factor(h_base1_swcorr$Hazard,levels=c(0.01,.3,.99),labels=c("H = 0.01","H = 0.3", "H = 0.99"))
+h_base1_swcorr$Incorrect.StimSwitch = -1*h_base1_swcorr$Incorrect.StimSwitch
+h_base1_swcorr.long = gather(h_base1_swcorr,Type,Beta,Incorrect:Incorrect.StimSwitch)
+h_base1_swcorr.long$Type = factor(h_base1_swcorr.long$Type,levels=c("StimSwitch","Incorrect","Incorrect.StimSwitch"),labels=c('Tone Switch','Incorrect','Incorrect x\nTone Switch'))
+
+base1_plt = ggplot(subset(h_base1_swcorr.long,is.na(Type)==0),aes(Type,Beta,color=Hazard,fill=Hazard,alpha=Type))+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_boxplot()+
+  scale_alpha_manual(values=c(0,.3,.7))+
+  facet_wrap(~Hazard)+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  ylab("Baseline Beta")+
+  ggtitle('Baseline After Tone')+
+  ylim(c(-.25,.25))+
+    theme(
+      legend.position = 'none',
+      plot.title = element_text(size=18,face='bold',hjust=.5),
+      axis.text.y = element_text(size=12,color='black'),
+      axis.text.x = element_text(size=12,color='black',angle=315,vjust=0.5,hjust=0),
+      axis.title.y = element_text(size=14,color='black'),
+      axis.title.x = element_blank(),
+      strip.background = element_blank(),
+      strip.text = element_text(size=16,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+base1_plt
+ggsave('./F2S2b_next_baseline.pdf',plot=base1_plt,width = 5,height=5)
+```
+
+
+```{r}
+# Incorrect*ToneSwitch interactions per hazard rate for evoked change
+# This takes about 4 hours to run on quad core macbook pro - skip to next section if already run
+getPupilCorrChangeLME = function(dat,haz){
+  pd_h = subset(dat,Hazard == haz)
+  names(pd_h)[27] = 'PupilChange'
+  pd_h$PupilChange = scale(pd_h$PupilChange-pd_h$Baseline)
+  pd_h$Correct = scale(pd_h$Correct)
+  pd_h$StimSwitch = scale(pd_h$StimSwitch)
+  pd_h$Baseline = scale(pd_h$Baseline)
+  pd_h$Baseline_1 = scale(pd_h$Baseline_1)
+  pd_h$Change_1 = scale(pd_h$Change_1)
+  
+  der_h_lme = lmer(PupilChange~Correct*StimSwitch+Baseline+Change_1+Baseline_1+
+                     (1|Subject)+(1+Correct*StimSwitch|Subject)+(1+Baseline|Subject)+(1+Change_1|Subject)+(1+Baseline_1|Subject),
+                   pd_h,REML=F, control=lmerControl(calc.derivs=F,optimize='nloptwrap'))
+  
+  summ_lme = summary(der_h_lme)
+  coef_lme = coef(der_h_lme)$Subject
+  betas_df = data.frame(coef_lme)
+  betas_df$Subject = row.names(coef_lme)
+  
+  return(list(Summary = summ_lme,Betas = betas_df))
+}
+
+pdat_df = data.frame(pdat)
+
+library(parallel)
+cores = 8
+cl = makeCluster(cores)
+ran = 1:120 #1:120 for all samples
+
+clusterExport(cl,c("getPupilCorrChangeLME","lmer","pdat.df","summary","coef","data.frame","lmerControl","ran"))
+
+print('Computing for H = .01')
+h1_pup_ec = parLapply(cl,ran,function(i) getPupilCorrChangeLME(pdat.df[,c(1:21,148:152,27+i)],0.01))
+saveRDS(h1_pup_ec,"./h1_pup_ec_corr.rds")
+
+print('Computing for H = .3')
+h3_pup_ec = parLapply(cl,ran,function(i) getPupilCorrChangeLME(pdat.df[,c(1:21,148:152,27+i)],0.3))
+saveRDS(h3_pup_ec,"./h3_pup_ec_corr.rds")
+
+print('Computing for H = .99')
+h9_pup_ec = parLapply(cl,ran,function(i) getPupilCorrChangeLME(pdat.df[,c(1:21,148:152,27+i)],0.99))
+saveRDS(h9_pup_ec,"./h9_pup_ec_corr.rds")
+
+print("Done!")
+stopCluster(cl)
+```
+```{r}
+# Script to get p-values for 10 time points from tone onset
+# Get mean pupil derivative for equally spaced bins - for p-values
+pdat_p = data.frame(pdat.df)
+bsize = 10
+interval = 120/bsize
+start = 20
+for(i in 1:bsize){
+  end = start+interval-1
+  pdat_p[,ncol(pdat_p)+1] = rowMeans(pdat_p[,start:end],na.rm=T)
+  names(pdat_p)[ncol(pdat_p)] = paste0("T",i)
+  start = start+interval
+}
+
+library(parallel)
+cores = 8
+cl = makeCluster(cores)
+ran = 1:bsize
+clusterExport(cl,c("getPupilCorrChangeLME","lmer","pdat_p","summary","coef","data.frame","lmerControl","ran",'bsize'))
+
+print('Computing for H = .01')
+h1_pup_ec_ps = parLapply(cl,ran,function(i) getPupilCorrChangeLME(pdat_p[,c(1:21,148:152,152+i)],0.01))
+saveRDS(h1_pup_ec_ps,"./h1_pup_ec_corr_ps.rds")
+
+print('Computing for H = .3')
+h3_pup_ec_ps = parLapply(cl,ran,function(i) getPupilCorrChangeLME(pdat_p[,c(1:21,148:152,152+i)],0.3))
+saveRDS(h3_pup_ec_ps,"./h3_pup_ec_corr_ps.rds")
+
+print('Computing for H = .99')
+h9_pup_ec_ps = parLapply(cl,ran,function(i) getPupilCorrChangeLME(pdat_p[,c(1:21,148:152,152+i)],0.99))
+saveRDS(h9_pup_ec_ps,"./h9_pup_ec_corr_ps.rds")
+
+print("Done!")
+stopCluster(cl)
+```
+
+
+```{r}
+# Plot evoked change
+# Load beta values computed above
+h1_pup_ec = readRDS("./h1_pup_ec_corr.rds")
+h3_pup_ec = readRDS("./h3_pup_ec_corr.rds")
+h9_pup_ec = readRDS("./h9_pup_ec_corr.rds")
+
+# Load p-values
+h1_pup_ec_ps = readRDS("./h1_pup_ec_corr_ps.rds")
+h3_pup_ec_ps = readRDS("./h3_pup_ec_corr_ps.rds")
+h9_pup_ec_ps = readRDS("./h9_pup_ec_corr_ps.rds")
+
+bsize = 10
+
+#First extract all of the betas for each subject for each trial
+getBetaDfs = function(i,hs,hnames){
+  h_beta = hs[[1]][[i]]$Betas
+  h_beta$Hazard = hnames[1]
+  if(length(hs) > 1){
+    for(x in 2:length(hnames)){
+      h_betap = hs[[x]][[i]]$Betas
+      h_betap$Hazard = hnames[x]
+      h_beta = rbind(h_beta,h_betap)
+    }
+  }
+  return(h_beta)
+}
+
+getAllBetas = function(ran,hs,hnames,hps,ts,bsize){
+  h_betas = getBetaDfs(ran[1],hs,hnames)
+  h_betas$Time = 1
+  for(i in ran[-1]){
+    h_betas_t = getBetaDfs(i,hs,hnames)
+    h_betas_t$Time = i
+    h_betas = rbind(h_betas,h_betas_t)
+  }
+  
+  # Get pvalues for time bins
+  start = 1
+  for(i in 1:ts){
+    end = start+bsize-1
+    for(x in 1:length(hnames)){
+      h_betas$CorrSW_Pval[h_betas$Hazard == hnames[x] & h_betas$Time %in% start:end] = hps[[x]][[i]]$Summary$coefficients[7,5]
+      h_betas$SW_Pval[h_betas$Hazard == hnames[x] & h_betas$Time %in% start:end] = hps[[x]][[i]]$Summary$coefficients[3,5]
+      h_betas$Corr_Pval[h_betas$Hazard == hnames[x] & h_betas$Time %in% start:end] = hps[[x]][[i]]$Summary$coefficients[2,5]
+    }
+    start = start+bsize
+  }
+  return(h_betas)
+}
+
+
+h_all_betas = getAllBetas(1:120,list(h1_pup_ec,h3_pup_ec,h9_pup_ec),c(0.01,0.3,0.99),list(h1_pup_ec_ps,h3_pup_ec_ps,h9_pup_ec_ps),bsize,120/bsize)
+h_all_betas$Hazard = factor(h_all_betas$Hazard, labels = c("H = 0.01","H = 0.3","H = 0.99"))
+
+h_all_betas.m = ddply(h_all_betas,.(Hazard,Time),summarize,
+                      MCorr = mean(Correct),
+                      Corr_MSE = mean_se(Correct)[[2]],
+                      Corr_PSE = mean_se(Correct)[[3]],
+                      Corr_P = mean(Corr_Pval),
+                      MSW = mean(StimSwitch),
+                      SW_MSE = mean_se(StimSwitch)[[2]],
+                      SW_PSE = mean_se(StimSwitch)[[3]],
+                      SW_P = mean(SW_Pval),
+                      MCorrSW = mean(Correct.StimSwitch),
+                      CorrSW_MSE = mean_se(Correct.StimSwitch)[[2]],
+                      CorrSW_PSE = mean_se(Correct.StimSwitch)[[3]],
+                      CorrSW_P = mean(CorrSW_Pval))
+
+pthresh = .05/bsize
+h_all_betas.m$CorrSW_P_Y = ifelse(h_all_betas.m$CorrSW_P < pthresh,.12,NA)
+h_all_betas.m$Corr_P_Y = ifelse(h_all_betas.m$Corr_P < pthresh,.125,NA)
+h_all_betas.m$SW_P_Y = ifelse(h_all_betas.m$SW_P < pthresh,.13,NA)
+
+
+library(ggplot2)
+plt = ggplot(h_all_betas.m)+
+  geom_hline(yintercept=c(0),linetype=3)+
+  geom_ribbon(aes(x = Time,ymin=CorrSW_MSE,ymax=CorrSW_PSE,color=Hazard,fill=Hazard),alpha=.7)+
+  geom_line(aes(Time,MCorrSW,color=Hazard),linetype=1,size=1)+
+  geom_line(aes(Time,CorrSW_P_Y,color=Hazard),linetype=1,size=1)+
+  geom_ribbon(aes(x = Time,ymin=-1*Corr_MSE,ymax=-1*Corr_PSE,color=Hazard,fill=Hazard),alpha=.3)+
+  geom_line(aes(Time,-1*MCorr,color=Hazard),linetype=2,size=1)+
+  geom_line(aes(Time,Corr_P_Y,color=Hazard),linetype=2,size=1)+
+  geom_ribbon(aes(x = Time,ymin=SW_MSE,ymax=SW_PSE,color=Hazard,fill=Hazard),alpha=0)+
+  geom_line(aes(Time,MSW,color=Hazard),linetype=3,size=1)+
+  geom_line(aes(Time,SW_P_Y,color=Hazard),linetype=3,size=1)+
+  ylab('Evoked Change Beta')+
+  xlab('Time from Tone Onset (sec)')+
+  ggtitle('Evoked Change')+
+  scale_x_continuous(breaks=c(0,60,120),labels=c(0,1,2))+
+  scale_color_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  scale_fill_manual(values=c("#0072B2","#D55E00","#E69F00"))+
+  facet_wrap(~Hazard)+
+    theme(
+      legend.position = "none",
+      plot.title = element_text(size=18,face='bold',hjust=.5),
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      strip.background = element_blank(),
+      strip.text = element_text(size=14,color='black',face='bold'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+plt
+ggsave('./F2S2c_evoked_change.pdf',plt,width=9,height=4)
+```
+
+
+
+
+

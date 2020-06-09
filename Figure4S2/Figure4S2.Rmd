@@ -1,0 +1,167 @@
+```{r}
+library(data.table)
+library(matrixStats)
+library(lme4)
+library(tidyr)
+library(plyr)
+library(lmerTest)
+library(parallel)
+library(ggplot2)
+
+## Plot recovered adaptivity parameters
+# Load adaptivity model fits
+adaptH = fread('../data/adaptH_params.csv',sep=',')
+
+# Load recovered parameters
+adaptH_recov = fread('../data/adaptH_param_recov.csv',sep=',')
+
+# Merge and plot for each parameter
+adaptH_all = merge(adaptH,adaptH_recov)
+
+# Plot correlations between true and recovered parameters for adaptivity model
+# H default
+hd_plt = ggplot(adaptH_all,aes(M2_Hd,Reco_M2_Hd))+
+  geom_smooth(method='lm',se=F,color='black')+
+  geom_point(size=4,color='black',alpha=.1)+
+  geom_point(size=4,color='black',shape=1,stroke=.75)+
+  ylab('Recovered H default')+
+  xlab('True H default')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+hd_plt
+ggsave('./Fig4S2a_hd_recov.pdf',hd_plt,height=4,width=5)
+
+# Adaptivity
+hm_plt = ggplot(adaptH_all,aes(M2_Hm,Reco_M2_Hm))+
+  geom_smooth(method='lm',se=F,color='black')+
+  geom_point(size=4,color='black',alpha=.1)+
+  geom_point(size=4,color='black',shape=1,stroke=.75)+
+  ylab('Recovered Adaptivity')+
+  xlab('True Adativity')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+hm_plt
+ggsave('./Fig4S2a_hm_recov.pdf',hm_plt,height=4,width=5)
+
+# Choice Variability
+cv_plt = ggplot(adaptH_all,aes(M2_CV,Reco_M2_CV))+
+  geom_smooth(method='lm',se=F,color='black')+
+  geom_point(size=4,color='black',alpha=.1)+
+  geom_point(size=4,color='black',shape=1,stroke=.75)+
+  ylab('Recovered Choice Variability')+
+  xlab('True Choice Variability')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+cv_plt
+ggsave('./Fig4S2a_cv_recov.pdf',cv_plt,height=4,width=5)
+```
+
+Parameter recovery for bayesian model
+```{r}
+# Load subject fits
+bayesH = fread('../data/BayesParams.csv',sep=',')
+
+# Load recovered parameters
+bayesH_recov = fread('../data/BayesParams_recov.csv',sep=',')
+
+# Merge
+bayesH_all = merge(bayesH,bayesH_recov)
+
+# Prior Mean
+mu_plt = ggplot(bayesH_all,aes(BM2_Mean,Reco_BM2_Mean))+
+  geom_smooth(method='lm',se=F,color='black')+
+  geom_point(size=4,color='black',alpha=.1)+
+  geom_point(size=4,color='black',shape=1,stroke=.75)+
+  ylab('Recovered Prior Mean')+
+  xlab('True Prior Mean')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+mu_plt
+ggsave('./Fig4S2b_mean_recov.pdf',mu_plt,height=4,width=5)
+
+# Prior Width
+phi_plt = ggplot(bayesH_all,aes(BM2_log_Precision,Reco_BM2_log_Precision))+
+  geom_smooth(method='lm',se=F,color='black')+
+  geom_point(size=4,color='black',alpha=.1)+
+  geom_point(size=4,color='black',shape=1,stroke=.75)+
+  ylab('Recovered Prior Width')+
+  xlab('True Prior Width')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+phi_plt
+ggsave('./Fig4S2b_width_recov.pdf',phi_plt,height=4,width=5)
+
+# Metahazard rate
+k_plt = ggplot(bayesH_all,aes(BM2_log_K,Reco_BM2_log_K))+
+  geom_smooth(method='lm',se=F,color='black')+
+  geom_point(size=4,color='black',alpha=.1)+
+  geom_point(size=4,color='black',shape=1,stroke=.75)+
+  ylab('Recovered Metahazard')+
+  xlab('True Metahazard')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+k_plt
+ggsave('./Fig4S2b_k_recov.pdf',k_plt,height=4,width=5)
+
+# Choice Variability
+cv_plt = ggplot(bayesH_all,aes(BM2_Noise,Reco_BM2_Noise))+
+  geom_smooth(method='lm',se=F,color='black')+
+  geom_point(size=4,color='black',alpha=.1)+
+  geom_point(size=4,color='black',shape=1,stroke=.75)+
+  ylab('Recovered Choice Variability')+
+  xlab('True Choice Variability')+
+    theme(
+      axis.text = element_text(size=12,color='black'),
+      axis.title = element_text(size=14,color='black'),
+      axis.line.x = element_line(size = .5,color="black"),
+      axis.line.y = element_line(size=.5,color="black"),
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+cv_plt
+ggsave('./Fig4S2b_cv_recov.pdf',cv_plt,height=4,width=5)
+```
+
